@@ -77,8 +77,8 @@
       <div><b>R</b> — reload &nbsp;·&nbsp; <b>1-3</b> — switch weapon</div>
       <div><b>Shift</b> — sprint &nbsp;·&nbsp; <b>P / Esc</b> — pause</div>
       <div style="margin-top:8px;color:#7dd53f">ON A PHONE</div>
-      <div><b>Bottom-left box</b> — drag to move (push far to sprint)</div>
-      <div><b>Anywhere else</b> — tap/hold where you want to shoot</div>
+      <div><b>Left half</b> — drag anywhere to move (push far to sprint)</div>
+      <div><b>Right half</b> — drag to aim and fire, or tap a target</div>
       <div><b>On-screen buttons</b> — weapons, reload, pause</div>
     </div>
     <button id="startBtn">START</button>
@@ -219,19 +219,33 @@ function pressButton(b) {
 }
 
 /* touch: left half virtual stick, right half aim+fire */
-const touch = { moveId: null, mx: 0, my: 0, dx: 0, dy: 0, active: false, aimId: null };
-const STICK_W = 0.30, STICK_H = 0.42;   // fraction of the world the thumb owns
-function inStickZone(x, y) { return x < W * STICK_W && y > H * STICK_H; }
+/* Twin-stick touch. Both sticks float: they appear wherever the thumb lands,
+   so there is no small box to find. Left half moves, right half aims and
+   fires. Aim is a direction, not a screen point, so every heading is
+   reachable -- including back over the move thumb. */
+const touch = {
+  moveId: null, mx: 0, my: 0, dx: 0, dy: 0, active: false,
+  aimId: null, ax: 0, ay: 0, adx: 0, ady: 0, aimActive: false, aimDragged: false
+};
+const STICK_CAP = 62;      // world px for full deflection
+const AIM_DEADZONE = 16;   // below this a touch counts as a tap, not a drag
 function handleTouchStart(e) {
   TOUCH_UI = true;
   for (const t of e.changedTouches) {
     const p = toWorld(t.clientX, t.clientY);
     const btn = hitButton(p.x, p.y);
     if (btn) { pressButton(btn); continue; }
-    if (inStickZone(p.x, p.y) && touch.moveId === null) {
-      touch.moveId = t.identifier; touch.mx = p.x; touch.my = p.y; touch.dx = 0; touch.dy = 0; touch.active = true;
+    if (p.x < W / 2) {
+      if (touch.moveId === null) {
+        touch.moveId = t.identifier; touch.mx = p.x; touch.my = p.y;
+        touch.dx = 0; touch.dy = 0; touch.active = true;
+      }
     } else if (touch.aimId === null) {
-      touch.aimId = t.identifier; mouse.x = p.x; mouse.y = p.y; mouse.down = true; fireQueued = true;
+      touch.aimId = t.identifier;
+      touch.ax = p.x; touch.ay = p.y; touch.adx = 0; touch.ady = 0;
+      touch.aimActive = true; touch.aimDragged = false;
+      mouse.x = p.x; mouse.y = p.y;      // a tap still shoots at the spot touched
+      mouse.down = true; fireQueued = true;
     }
   }
   e.preventDefault();
@@ -241,17 +255,29 @@ function handleTouchMove(e) {
     const p = toWorld(t.clientX, t.clientY);
     if (t.identifier === touch.moveId) {
       let dx = p.x - touch.mx, dy = p.y - touch.my;
-      const m = Math.hypot(dx, dy) || 1, cap = 60;
-      if (m > cap) { dx = dx / m * cap; dy = dy / m * cap; }
-      touch.dx = dx / cap; touch.dy = dy / cap;
-    } else if (t.identifier === touch.aimId) { mouse.x = p.x; mouse.y = p.y; }
+      const m = Math.hypot(dx, dy) || 1;
+      if (m > STICK_CAP) { dx = dx / m * STICK_CAP; dy = dy / m * STICK_CAP; }
+      touch.dx = dx / STICK_CAP; touch.dy = dy / STICK_CAP;
+    } else if (t.identifier === touch.aimId) {
+      const dx = p.x - touch.ax, dy = p.y - touch.ay;
+      const m = Math.hypot(dx, dy);
+      if (m > AIM_DEADZONE) {
+        touch.aimDragged = true;
+        const k = m > STICK_CAP ? STICK_CAP / m : 1;
+        touch.adx = dx * k / STICK_CAP; touch.ady = dy * k / STICK_CAP;
+      }
+      if (!touch.aimDragged) { mouse.x = p.x; mouse.y = p.y; }
+    }
   }
   e.preventDefault();
 }
 function handleTouchEnd(e) {
   for (const t of e.changedTouches) {
     if (t.identifier === touch.moveId) { touch.moveId = null; touch.active = false; touch.dx = touch.dy = 0; }
-    if (t.identifier === touch.aimId) { touch.aimId = null; mouse.down = false; }
+    if (t.identifier === touch.aimId) {
+      touch.aimId = null; touch.aimActive = false; touch.aimDragged = false;
+      touch.adx = touch.ady = 0; mouse.down = false;
+    }
   }
   e.preventDefault();
 }
@@ -398,7 +424,14 @@ class Player {
     this.y = clamp(this.y + dy * sp, this.r, H - this.r);
     if (m > 0.1) this.walkPhase += 0.25 * dt * (this.sprinting ? 1.6 : 1);
 
-    this.angle = Math.atan2(mouse.y - this.y, mouse.x - this.x);
+    if (touch.aimActive && touch.aimDragged) {
+      // direction stick: heading comes from the drag, not a screen position
+      this.angle = Math.atan2(touch.ady, touch.adx);
+      mouse.x = this.x + Math.cos(this.angle) * 200;   // park the reticle ahead
+      mouse.y = this.y + Math.sin(this.angle) * 200;
+    } else {
+      this.angle = Math.atan2(mouse.y - this.y, mouse.x - this.x);
+    }
 
     if (this.reloading && game.time >= this.reloadEnd) {
       const w = this.weapon, need = w.mag - this.ammo[this.wi];
@@ -409,7 +442,7 @@ class Player {
     }
 
     if (mouse.down || fireQueued) {
-      if (this.weapon.auto && mouse.down) this.tryShoot();
+      if ((this.weapon.auto || touch.aimActive) && mouse.down) this.tryShoot();
       else if (!this._heldFire) { this.tryShoot(); this._heldFire = true; }
     }
     if (!mouse.down) this._heldFire = false;
@@ -745,6 +778,7 @@ const game = {
     this.combo = 0; this.comboTimer = 0;
     this.shake = 0; this.redFlash = 0;
     this.banner = "GET READY"; this.bannerTime = 1800;
+    this.hintTime = 7000;
   },
   addScore(n, x, y, crit) {
     this.score += n;
@@ -947,6 +981,7 @@ function update(dt) {
   }
 
   if (game.bannerTime > 0) game.bannerTime -= 16.6 * dt;
+  if (game.hintTime > 0) game.hintTime -= 16.6 * dt;
   game.shake *= Math.pow(0.88, dt);
   game.redFlash *= Math.pow(0.90, dt);
 }
@@ -1173,20 +1208,41 @@ function render() {
     ctx.fillStyle = grd; ctx.fillRect(0, 0, W, H);
   }
 
-  if (TOUCH_UI && game.state === "play" && !touch.active) {
-    ctx.strokeStyle = "rgba(125,213,63,.10)";
-    ctx.setLineDash([6, 8]); ctx.lineWidth = 2;
-    ctx.strokeRect(4, H * STICK_H, W * STICK_W - 8, H * (1 - STICK_H) - 6);
-    ctx.setLineDash([]);
-    ctx.fillStyle = "rgba(125,213,63,.16)";
-    ctx.font = "bold 11px 'Courier New', monospace"; ctx.textAlign = "center";
-    ctx.fillText("MOVE", W * STICK_W / 2, H - 16);
+  // both sticks, drawn where the thumbs actually landed
+  function drawStick(cx, cy, nx, ny, tint) {
+    ctx.strokeStyle = tint + ".26)"; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(cx, cy, STICK_CAP, 0, TAU); ctx.stroke();
+    ctx.fillStyle = tint + ".24)";
+    ctx.beginPath(); ctx.arc(cx + nx * STICK_CAP, cy + ny * STICK_CAP, 24, 0, TAU); ctx.fill();
   }
-  if (touch.active && game.state === "play") {
-    ctx.strokeStyle = "rgba(125,213,63,.30)"; ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.arc(touch.mx, touch.my, 60, 0, TAU); ctx.stroke();
-    ctx.fillStyle = "rgba(125,213,63,.28)";
-    ctx.beginPath(); ctx.arc(touch.mx + touch.dx * 60, touch.my + touch.dy * 60, 24, 0, TAU); ctx.fill();
+  if (game.state === "play") {
+    if (touch.active) drawStick(touch.mx, touch.my, touch.dx, touch.dy, "rgba(125,213,63,");
+    if (touch.aimActive) drawStick(touch.ax, touch.ay, touch.adx, touch.ady, "rgba(255,120,90,");
+  }
+
+  // first-run control hint -- movement was undiscoverable without it
+  if (game.state === "play" && game.hintTime > 0) {
+    const a = Math.min(1, game.hintTime / 900) * 0.85;
+    ctx.save();
+    ctx.globalAlpha = a;
+    ctx.textAlign = "center";
+    ctx.font = "bold 15px 'Courier New', monospace";
+    if (TOUCH_UI) {
+      ctx.fillStyle = "#7dd53f";
+      ctx.fillText("DRAG ANYWHERE THIS SIDE TO MOVE", W * 0.25, H - 44);
+      ctx.fillStyle = "#ff785a";
+      ctx.fillText("DRAG THIS SIDE TO AIM + FIRE", W * 0.75, H - 44);
+      ctx.strokeStyle = "rgba(255,255,255,.10)"; ctx.lineWidth = 1;
+      ctx.setLineDash([5, 7]);
+      ctx.beginPath(); ctx.moveTo(W / 2, 150); ctx.lineTo(W / 2, H - 70); ctx.stroke();
+      ctx.setLineDash([]);
+    } else {
+      ctx.fillStyle = "#7dd53f";
+      ctx.fillText("W A S D  or  ARROW KEYS  to move", W / 2, H - 62);
+      ctx.fillStyle = "#cfd6c9";
+      ctx.fillText("MOUSE to aim   ·   CLICK to fire   ·   R to reload", W / 2, H - 40);
+    }
+    ctx.restore();
   }
 
   drawHUD(ctx);

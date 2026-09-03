@@ -23,16 +23,22 @@ Open `index.html` in any modern browser. That's it.
 
 Play it in **landscape** — the game shows a rotate prompt and pauses in portrait.
 
+Twin-stick controls. Both sticks **float**: they appear wherever your thumb
+lands, so there is no fixed pad to hunt for.
+
 | Touch | Action |
 |---|---|
-| Bottom-left dashed box | Drag to move; push the stick far to sprint |
-| Anywhere else | Tap or hold where you want to shoot |
+| **Left half** — drag anywhere | Move in any direction; push far to sprint |
+| **Right half** — drag anywhere | Aim in that direction and fire continuously |
+| **Right half** — quick tap | Fire at the exact spot you tapped |
 | On-screen buttons | Weapon slots, reload, pause |
 
-The playfield width follows the screen aspect ratio, so it fills a phone
-edge to edge instead of sitting in letterbox bars. The move stick is confined
-to a bottom-left thumb zone rather than the whole left half, so you can still
-aim and fire at anything on your left.
+Both thumbs work at once, so you can retreat while firing behind you.
+
+Because aim on the right stick is a *direction* rather than a screen
+position, every heading is reachable — including straight back over the
+hand that is moving you. The playfield width follows the screen aspect
+ratio, so the game fills a phone edge to edge.
 
 ## How it plays
 
