@@ -2,7 +2,11 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0b0d0a">
 <title>Dead Zone — Zombie Wave Shooter</title>
 <style>
   :root {
@@ -32,6 +36,7 @@
     padding: 24px;
   }
   .overlay.hidden { display: none; }
+  #rotate { z-index: 40; background: #060706; }
   .panel { max-width: 620px; }
   h1 {
     margin: 0 0 6px;
@@ -71,7 +76,10 @@
       <div><b>Mouse</b> — aim &nbsp;·&nbsp; <b>Click / Hold</b> — shoot</div>
       <div><b>R</b> — reload &nbsp;·&nbsp; <b>1-3</b> — switch weapon</div>
       <div><b>Shift</b> — sprint &nbsp;·&nbsp; <b>P / Esc</b> — pause</div>
-      <div>Touch: <b>left half</b> = move stick, <b>right half</b> = aim &amp; fire</div>
+      <div style="margin-top:8px;color:#7dd53f">ON A PHONE</div>
+      <div><b>Bottom-left box</b> — drag to move (push far to sprint)</div>
+      <div><b>Anywhere else</b> — tap/hold where you want to shoot</div>
+      <div><b>On-screen buttons</b> — weapons, reload, pause</div>
     </div>
     <button id="startBtn">START</button>
     <div id="touchNote">Rotate to landscape for a better view.</div>
@@ -83,6 +91,14 @@
     <h2>YOU DIED</h2>
     <div class="stat" id="goStats"></div>
     <button id="retryBtn">TRY AGAIN</button>
+  </div>
+</div>
+
+<div id="rotate" class="overlay hidden">
+  <div class="panel">
+    <h2>ROTATE YOUR PHONE</h2>
+    <div class="sub">this one wants landscape</div>
+    <div style="font-size:56px;margin-top:10px">📱↻</div>
   </div>
 </div>
 
@@ -104,20 +120,46 @@
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
 
-const W = 960, H = 600;          // logical world size (fixed, scaled to fit)
+/* Logical world. Height is fixed so enemy/player scale stays constant;
+   width follows the screen aspect so phones fill the display instead of
+   sitting in letterbox bars. */
+let W = 960;
+const H = 600;
 canvas.width = W; canvas.height = H;
 
-let scale = 1, offX = 0, offY = 0;
+let scale = 1;
 function resize() {
-  const pad = 0;
-  const sw = window.innerWidth - pad, sh = window.innerHeight - pad;
+  const sw = window.innerWidth, sh = window.innerHeight;
+  const aspect = sw / sh;
+  const want = Math.round(aspect * H);
+  W = want < 760 ? 760 : want > 1600 ? 1600 : want;   // inline clamp: runs before utils init
+  canvas.width = W; canvas.height = H;
   scale = Math.min(sw / W, sh / H);
   canvas.style.width = (W * scale) + "px";
   canvas.style.height = (H * scale) + "px";
-  const r = canvas.getBoundingClientRect();
-  offX = r.left; offY = r.top;
+  // keep everything inside the new bounds
+  if (typeof player !== "undefined" && player) {
+    player.x = Math.min(player.x, W - player.r);
+    player.y = Math.min(player.y, H - player.r);
+  }
 }
-window.addEventListener("resize", resize);
+function checkOrientation() {
+  const portrait = window.innerHeight > window.innerWidth;
+  const isTouch = matchMedia("(hover: none)").matches || TOUCH_UI;
+  const show = portrait && isTouch;
+  document.getElementById("rotate").classList.toggle("hidden", !show);
+  const pausedEl = document.getElementById("paused");
+  if (show) {
+    // pause silently — stacking the pause panel under the rotate notice
+    // made both unreadable, and RESUME must not be reachable in portrait
+    if (game.state === "play") game.state = "paused";
+    pausedEl.classList.add("hidden");
+  } else if (game.state === "paused") {
+    pausedEl.classList.remove("hidden");   // back in landscape: resume deliberately
+  }
+}
+window.addEventListener("resize", () => { resize(); checkOrientation(); });
+window.addEventListener("orientationchange", () => setTimeout(() => { resize(); checkOrientation(); }, 250));
 
 /* ---------------- utils ---------------- */
 const TAU = Math.PI * 2;
@@ -131,6 +173,7 @@ const pick = arr => arr[Math.floor(Math.random() * arr.length)];
 /* ---------------- input ---------------- */
 const keys = Object.create(null);
 const mouse = { x: W / 2, y: H / 2, down: false };
+let fireQueued = false;   // set on press, consumed by the next update tick
 
 addEventListener("keydown", e => {
   const k = e.key.toLowerCase();
@@ -150,19 +193,45 @@ function toWorld(cx, cy) {
   return { x: (cx - r.left) / scale, y: (cy - r.top) / scale };
 }
 canvas.addEventListener("mousemove", e => { const p = toWorld(e.clientX, e.clientY); mouse.x = p.x; mouse.y = p.y; });
-canvas.addEventListener("mousedown", e => { if (e.button === 0) mouse.down = true; });
+canvas.addEventListener("mousedown", e => {
+  if (e.button !== 0) return;
+  const p = toWorld(e.clientX, e.clientY);
+  const btn = hitButton(p.x, p.y);
+  if (btn) { pressButton(btn); return; }
+  mouse.down = true; fireQueued = true;
+});
 addEventListener("mouseup", e => { if (e.button === 0) mouse.down = false; });
 canvas.addEventListener("contextmenu", e => e.preventDefault());
 
+/* on-screen buttons (rebuilt each HUD draw, hit-tested before move/aim) */
+let TOUCH_UI = false;          // flips on once a real touch is seen
+let uiButtons = [];            // [{x,y,w,h,id}]
+function hitButton(x, y) {
+  for (const b of uiButtons) {
+    if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return b;
+  }
+  return null;
+}
+function pressButton(b) {
+  if (b.id === "reload") player.reload();
+  else if (b.id === "pause") togglePause();
+  else if (b.id.startsWith("w")) player.selectWeapon(+b.id.slice(1));
+}
+
 /* touch: left half virtual stick, right half aim+fire */
 const touch = { moveId: null, mx: 0, my: 0, dx: 0, dy: 0, active: false, aimId: null };
+const STICK_W = 0.30, STICK_H = 0.42;   // fraction of the world the thumb owns
+function inStickZone(x, y) { return x < W * STICK_W && y > H * STICK_H; }
 function handleTouchStart(e) {
+  TOUCH_UI = true;
   for (const t of e.changedTouches) {
     const p = toWorld(t.clientX, t.clientY);
-    if (p.x < W / 2 && touch.moveId === null) {
+    const btn = hitButton(p.x, p.y);
+    if (btn) { pressButton(btn); continue; }
+    if (inStickZone(p.x, p.y) && touch.moveId === null) {
       touch.moveId = t.identifier; touch.mx = p.x; touch.my = p.y; touch.dx = 0; touch.dy = 0; touch.active = true;
     } else if (touch.aimId === null) {
-      touch.aimId = t.identifier; mouse.x = p.x; mouse.y = p.y; mouse.down = true;
+      touch.aimId = t.identifier; mouse.x = p.x; mouse.y = p.y; mouse.down = true; fireQueued = true;
     }
   }
   e.preventDefault();
@@ -318,7 +387,8 @@ class Player {
     const m = Math.hypot(dx, dy);
     if (m > 1) { dx /= m; dy /= m; }
 
-    const wantSprint = (keys["shift"] || false) && m > 0.1 && this.stamina > 1;
+    const stickFull = touch.active && Math.hypot(touch.dx, touch.dy) > 0.92;
+    const wantSprint = (keys["shift"] || stickFull) && m > 0.1 && this.stamina > 1;
     this.sprinting = wantSprint;
     if (wantSprint) this.stamina = Math.max(0, this.stamina - 0.55 * dt);
     else this.stamina = Math.min(100, this.stamina + 0.30 * dt);
@@ -338,10 +408,12 @@ class Player {
       this.reloading = false;
     }
 
-    if (mouse.down) {
-      if (this.weapon.auto) this.tryShoot();
+    if (mouse.down || fireQueued) {
+      if (this.weapon.auto && mouse.down) this.tryShoot();
       else if (!this._heldFire) { this.tryShoot(); this._heldFire = true; }
-    } else this._heldFire = false;
+    }
+    if (!mouse.down) this._heldFire = false;
+    fireQueued = false;
 
     this.recoil = Math.max(0, this.recoil - 0.6 * dt);
     if (this.invuln > 0) this.invuln -= dt * 16.6;
@@ -934,20 +1006,47 @@ function drawHUD(g) {
     g.fillText("RELOADING", 142, 114);
   }
 
-  // weapon slots
+  // weapon slots (+ reload / pause on touch) — also the tap targets
+  uiButtons.length = 0;
+  const bw = TOUCH_UI ? 62 : 42, bh = TOUCH_UI ? 44 : 30, gap = TOUCH_UI ? 8 : 6;
   for (let i = 0; i < 3; i++) {
-    const bx = 16 + i * 48, by = 124;
+    const bx = 16 + i * (bw + gap), by = 124;
+    if (player.unlocked[i]) uiButtons.push({ x: bx, y: by, w: bw, h: bh, id: "w" + i });
     g.globalAlpha = player.unlocked[i] ? 1 : 0.25;
     g.fillStyle = i === player.wi ? "rgba(125,213,63,.22)" : "rgba(0,0,0,.5)";
-    g.fillRect(bx, by, 42, 30);
+    g.fillRect(bx, by, bw, bh);
     g.strokeStyle = i === player.wi ? "#7dd53f" : "rgba(255,255,255,.25)";
     g.lineWidth = i === player.wi ? 2 : 1;
-    g.strokeRect(bx + .5, by + .5, 41, 29);
+    g.strokeRect(bx + .5, by + .5, bw - 1, bh - 1);
     g.fillStyle = WEAPONS[i].color;
-    g.font = "bold 10px 'Courier New', monospace"; g.textAlign = "center";
-    g.fillText(String(i + 1), bx + 21, by + 12);
-    g.fillText(WEAPONS[i].short, bx + 21, by + 24);
+    g.font = "bold " + (TOUCH_UI ? 12 : 10) + "px 'Courier New', monospace"; g.textAlign = "center";
+    g.fillText(String(i + 1), bx + bw / 2, by + bh * 0.4);
+    g.fillText(WEAPONS[i].short, bx + bw / 2, by + bh * 0.78);
     g.globalAlpha = 1;
+  }
+
+  if (TOUCH_UI) {
+    const ry = 124 + bh + 10;
+    // RELOAD
+    const rw = 2 * bw + gap;
+    uiButtons.push({ x: 16, y: ry, w: rw, h: bh, id: "reload" });
+    const needsReload = player.ammo[player.wi] < player.weapon.mag && !player.reloading;
+    g.fillStyle = needsReload ? "rgba(255,215,106,.22)" : "rgba(0,0,0,.5)";
+    g.fillRect(16, ry, rw, bh);
+    g.strokeStyle = needsReload ? "#ffd76a" : "rgba(255,255,255,.25)";
+    g.lineWidth = needsReload ? 2 : 1;
+    g.strokeRect(16.5, ry + .5, rw - 1, bh - 1);
+    g.fillStyle = "#ffd76a"; g.font = "bold 13px 'Courier New', monospace"; g.textAlign = "center";
+    g.fillText(player.reloading ? "..." : "RELOAD", 16 + rw / 2, ry + bh * 0.62);
+    // PAUSE
+    const px2 = 16 + rw + gap;
+    uiButtons.push({ x: px2, y: ry, w: bw, h: bh, id: "pause" });
+    g.fillStyle = "rgba(0,0,0,.5)"; g.fillRect(px2, ry, bw, bh);
+    g.strokeStyle = "rgba(255,255,255,.25)"; g.lineWidth = 1;
+    g.strokeRect(px2 + .5, ry + .5, bw - 1, bh - 1);
+    g.fillStyle = "#cfd6c9";
+    g.fillRect(px2 + bw / 2 - 7, ry + bh / 2 - 8, 5, 16);
+    g.fillRect(px2 + bw / 2 + 2, ry + bh / 2 - 8, 5, 16);
   }
 
   // score / wave (right side)
@@ -1074,8 +1173,30 @@ function render() {
     ctx.fillStyle = grd; ctx.fillRect(0, 0, W, H);
   }
 
+  if (TOUCH_UI && game.state === "play" && !touch.active) {
+    ctx.strokeStyle = "rgba(125,213,63,.10)";
+    ctx.setLineDash([6, 8]); ctx.lineWidth = 2;
+    ctx.strokeRect(4, H * STICK_H, W * STICK_W - 8, H * (1 - STICK_H) - 6);
+    ctx.setLineDash([]);
+    ctx.fillStyle = "rgba(125,213,63,.16)";
+    ctx.font = "bold 11px 'Courier New', monospace"; ctx.textAlign = "center";
+    ctx.fillText("MOVE", W * STICK_W / 2, H - 16);
+  }
+  if (touch.active && game.state === "play") {
+    ctx.strokeStyle = "rgba(125,213,63,.30)"; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(touch.mx, touch.my, 60, 0, TAU); ctx.stroke();
+    ctx.fillStyle = "rgba(125,213,63,.28)";
+    ctx.beginPath(); ctx.arc(touch.mx + touch.dx * 60, touch.my + touch.dy * 60, 24, 0, TAU); ctx.fill();
+  }
+
   drawHUD(ctx);
-  if (game.state === "play") drawCrosshair(ctx);
+  if (game.state === "play" && !TOUCH_UI) drawCrosshair(ctx);
+  else if (game.state === "play") {
+    // touch: mark the aim point without hiding it under the finger
+    ctx.strokeStyle = "rgba(125,213,63,.75)"; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(mouse.x, mouse.y, 16, 0, TAU); ctx.stroke();
+    ctx.beginPath(); ctx.arc(mouse.x, mouse.y, 2.5, 0, TAU); ctx.stroke();
+  }
 }
 
 /* ---------------- loop ---------------- */

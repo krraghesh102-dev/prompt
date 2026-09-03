@@ -19,7 +19,20 @@ Open `index.html` in any modern browser. That's it.
 | `1` `2` `3` | Switch weapon |
 | `P` / `Esc` | Pause |
 
-Touch: left half of the screen is a virtual move stick, right half aims and fires.
+## On a phone
+
+Play it in **landscape** — the game shows a rotate prompt and pauses in portrait.
+
+| Touch | Action |
+|---|---|
+| Bottom-left dashed box | Drag to move; push the stick far to sprint |
+| Anywhere else | Tap or hold where you want to shoot |
+| On-screen buttons | Weapon slots, reload, pause |
+
+The playfield width follows the screen aspect ratio, so it fills a phone
+edge to edge instead of sitting in letterbox bars. The move stick is confined
+to a bottom-left thumb zone rather than the whole left half, so you can still
+aim and fire at anything on your left.
 
 ## How it plays
 
@@ -53,3 +66,8 @@ Everything lives in `index.html`: markup, CSS, and the game in a single
 `<script>`. The game is a fixed 960x600 logical canvas scaled to fit the
 window, with a `requestAnimationFrame` loop, delta-time normalized to 60fps,
 and a small WebAudio synth for sound (no audio files).
+
+The world height is fixed at 600 so enemy and player scale stay constant;
+the width is recomputed from the viewport aspect on resize and clamped to
+760-1600. Fire input is latched on press, so a tap that starts and ends
+inside a single frame still registers a shot.
