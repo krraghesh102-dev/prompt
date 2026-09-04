@@ -29,7 +29,8 @@
 
   .overlay {
     position: fixed; inset: 0;
-    display: grid; place-items: center;
+    display: flex; align-items: center; justify-content: center;
+    overflow-y: auto; -webkit-overflow-scrolling: touch;
     background: radial-gradient(ellipse at center, rgba(20,25,18,.86), rgba(4,5,4,.97));
     z-index: 10;
     text-align: center;
@@ -37,7 +38,7 @@
   }
   .overlay.hidden { display: none; }
   #rotate { z-index: 40; background: #060706; }
-  .panel { max-width: 620px; }
+  .panel { max-width: 620px; margin: auto; padding: 8px 0; }
   h1 {
     margin: 0 0 6px;
     font-size: clamp(34px, 7vw, 64px);
@@ -62,6 +63,17 @@
   .stat span { color: #fff; }
   #touchNote { display: none; font-size: 12px; color: #7f8a79; margin-top: 16px; }
   @media (hover: none) { #touchNote { display: block; } }
+
+  /* short landscape phones: keep the whole panel, START included, on screen */
+  @media (max-height: 480px) {
+    h1 { font-size: 30px; letter-spacing: 3px; }
+    h2 { font-size: 20px; margin-bottom: 8px; }
+    .sub { margin-bottom: 10px; font-size: 11px; letter-spacing: 1px; }
+    .keys { font-size: 11px; line-height: 1.45; gap: 1px; margin-bottom: 12px; }
+    .stat { font-size: 12px; line-height: 1.6; margin-bottom: 10px; }
+    button { padding: 9px 26px; font-size: 14px; }
+    #touchNote { margin-top: 8px; font-size: 11px; }
+  }
 </style>
 </head>
 <body>
@@ -76,10 +88,12 @@
       <div><b>Mouse</b> — aim &nbsp;·&nbsp; <b>Click / Hold</b> — shoot</div>
       <div><b>R</b> — reload &nbsp;·&nbsp; <b>1-3</b> — switch weapon</div>
       <div><b>Shift</b> — sprint &nbsp;·&nbsp; <b>P / Esc</b> — pause</div>
+      <div><b>G</b> — grenade &nbsp;·&nbsp; <b>F</b> — shield &nbsp;·&nbsp; <b>Q</b> — power blast</div>
       <div style="margin-top:8px;color:#7dd53f">ON A PHONE</div>
       <div><b>Left half</b> — drag anywhere to move (push far to sprint)</div>
       <div><b>Right half</b> — drag to aim and fire, or tap a target</div>
       <div><b>On-screen buttons</b> — weapons, reload, pause</div>
+      <div><b>Bottom-right</b> — grenade, shield, power blast</div>
     </div>
     <button id="startBtn">START</button>
     <div id="touchNote">Rotate to landscape for a better view.</div>
@@ -184,6 +198,9 @@ addEventListener("keydown", e => {
   if (k === "1") player.selectWeapon(0);
   if (k === "2") player.selectWeapon(1);
   if (k === "3") player.selectWeapon(2);
+  if (k === "g") player.useItem("grenade");
+  if (k === "f") player.useItem("shield");
+  if (k === "q") player.useItem("blast");
 });
 addEventListener("keyup", e => { keys[e.key.toLowerCase()] = false; });
 addEventListener("blur", () => { for (const k in keys) keys[k] = false; mouse.down = false; });
@@ -215,6 +232,7 @@ function hitButton(x, y) {
 function pressButton(b) {
   if (b.id === "reload") player.reload();
   else if (b.id === "pause") togglePause();
+  else if (b.id.startsWith("item:")) player.useItem(b.id.slice(5));
   else if (b.id.startsWith("w")) player.selectWeapon(+b.id.slice(1));
 }
 
@@ -325,7 +343,26 @@ const SFX = {
   pickup:  () => { blip("triangle", 620, 0.09, 0.07); setTimeout(() => blip("triangle", 900, 0.11, 0.07), 80); },
   wave:    () => { blip("sawtooth", 90, 0.7, 0.09, 45); },
   empty:   () => blip("square", 90, 0.05, 0.04),
-  death:   () => { blip("sawtooth", 200, 0.9, 0.14, 35); noise(0.7, 0.1, 350); }
+  death:   () => { blip("sawtooth", 200, 0.9, 0.14, 35); noise(0.7, 0.1, 350); },
+  throw:   () => blip("triangle", 420, 0.10, 0.05, 200),
+  boom:    () => { noise(0.55, 0.30, 900); blip("sawtooth", 70, 0.45, 0.14, 28); },
+  shieldOn:() => { blip("sine", 300, 0.18, 0.08, 780); setTimeout(() => blip("sine", 640, 0.22, 0.07, 900), 120); },
+  shieldHit:() => blip("sine", 900, 0.10, 0.07, 420),
+  shieldOff:() => blip("sine", 620, 0.26, 0.06, 180),
+  blast:   () => { noise(0.7, 0.32, 1600); blip("sawtooth", 150, 0.6, 0.15, 34);
+                   setTimeout(() => blip("square", 90, 0.35, 0.10, 30), 90); }
+};
+
+/* ---------------- throwables & abilities ----------------
+   These are consumables, separate from the three guns: limited charges,
+   replenished by drops and a small top-up each wave. */
+const ITEMS = {
+  grenade: { name: "GRENADE", key: "G", max: 6, start: 3, color: "#9ad34f",
+             fuse: 820, radius: 118, dmg: 150, knock: 16, throwSpeed: 8.5 },
+  shield:  { name: "SHIELD",  key: "F", max: 3, start: 1, color: "#5fd0ff",
+             duration: 6500 },
+  blast:   { name: "BLAST",   key: "Q", max: 3, start: 1, color: "#ff8de0",
+             radius: 210, dmg: 260, knock: 26, cooldown: 900 }
 };
 
 /* ---------------- weapons ---------------- */
@@ -333,7 +370,7 @@ const WEAPONS = [
   { name: "PISTOL",  short: "PSTL", dmg: 26, rof: 210, mag: 12, reload: 900,  spread: 0.035, speed: 14, pellets: 1, auto: false,
     reserveMax: Infinity, sfx: "shot",    knock: 3,  color: "#ffd76a", tracer: 1.0 },
   { name: "SHOTGUN", short: "SHTG", dmg: 17, rof: 720, mag: 6,  reload: 1500, spread: 0.20,  speed: 12, pellets: 7, auto: false,
-    reserveMax: 48, sfx: "shotgun", knock: 9,  color: "#ff9a3c", tracer: 1.4 },
+    reserveMax: 48, sfx: "shotgun", knock: 6,  color: "#ff9a3c", tracer: 1.4 },
   { name: "RIFLE",   short: "RIFL", dmg: 15, rof: 85,  mag: 32, reload: 1300, spread: 0.075, speed: 17, pellets: 1, auto: true,
     reserveMax: 210, sfx: "rifle",   knock: 2,  color: "#8ee8ff", tracer: 0.8 }
 ];
@@ -357,7 +394,12 @@ class Player {
     this.stamina = 100; this.sprinting = false;
     this.recoil = 0;
     this.walkPhase = 0;
+    this.items = { grenade: ITEMS.grenade.start, shield: ITEMS.shield.start, blast: ITEMS.blast.start };
+    this.shieldUntil = 0;      // timestamp the security layer drops
+    this.shieldFlash = 0;      // brief flare when it absorbs a hit
+    this.blastReady = 0;       // cooldown gate so one click is one blast
   }
+  get shielded() { return game.time < this.shieldUntil; }
   get weapon() { return WEAPONS[this.wi]; }
   selectWeapon(i) {
     if (i === this.wi || !this.unlocked[i] || game.state !== "play") return;
@@ -402,6 +444,40 @@ class Player {
     SFX[w.sfx]();
     if (this.ammo[this.wi] === 0) this.reload();
   }
+  useItem(kind) {
+    if (game.state !== "play") return;
+    if (this.items[kind] <= 0) { SFX.empty(); game.toast("NO " + ITEMS[kind].name, "#ff6b6b"); return; }
+
+    if (kind === "grenade") {
+      const g = ITEMS.grenade;
+      this.items.grenade--;
+      grenades.push(new Grenade(
+        this.x + Math.cos(this.angle) * (this.r + 8),
+        this.y + Math.sin(this.angle) * (this.r + 8),
+        Math.cos(this.angle) * g.throwSpeed,
+        Math.sin(this.angle) * g.throwSpeed
+      ));
+      SFX.throw();
+
+    } else if (kind === "shield") {
+      const s = ITEMS.shield;
+      this.items.shield--;
+      // re-arming while up extends rather than restarts, so a charge is never wasted
+      this.shieldUntil = Math.max(game.time, this.shieldUntil) + s.duration;
+      game.toast("SECURITY LAYER UP", s.color);
+      SFX.shieldOn();
+
+    } else if (kind === "blast") {
+      const b = ITEMS.blast;
+      if (game.time < this.blastReady) return;
+      this.items.blast--;
+      this.blastReady = game.time + b.cooldown;
+      explode(this.x, this.y, b.radius, b.dmg, b.knock, "#ff8de0", true);
+      game.toast("POWER BLAST", b.color);
+      SFX.blast();
+    }
+  }
+
   update(dt) {
     // movement
     let dx = 0, dy = 0;
@@ -453,6 +529,18 @@ class Player {
   }
   damage(n) {
     if (this.invuln > 0) return;
+    if (this.shielded) {
+      // full-body layer: the hit lands on the barrier, not the player
+      this.shieldFlash = 220;
+      game.shake = Math.min(14, game.shake + 3);
+      SFX.shieldHit();
+      for (let i = 0; i < 8; i++) {
+        const a = rand(0, TAU);
+        particles.push(new Particle(this.x + Math.cos(a) * this.r * 1.6, this.y + Math.sin(a) * this.r * 1.6,
+          Math.cos(a) * rand(1, 3), Math.sin(a) * rand(1, 3), rand(1.5, 3), "#5fd0ff", 380));
+      }
+      return;
+    }
     this.hp -= n;
     this.invuln = 380;
     game.shake = Math.min(20, game.shake + 8);
@@ -546,7 +634,9 @@ class Zombie {
     this.r = t.r;
     this.dead = false;
     this.lastTouch = 0;
-    this.vx = 0; this.vy = 0;
+    this.vx = 0; this.vy = 0;    // steering (speed-capped)
+    this.kx = 0; this.ky = 0;    // external impulse (not capped -- see update)
+    this.mass = t.r / 13;        // bigger things shrug off hits
     this.phase = rand(0, TAU);
     this.flash = 0;
     this.angle = 0;
@@ -556,7 +646,7 @@ class Zombie {
   hurt(n, kx, ky) {
     this.hp -= n;
     this.flash = 120;
-    this.vx += kx; this.vy += ky;
+    this.kx += kx / this.mass; this.ky += ky / this.mass;
     for (let i = 0; i < 4; i++) {
       const a = Math.atan2(ky, kx) + rand(-0.9, 0.9);
       particles.push(new Particle(this.x, this.y, Math.cos(a) * rand(1, 4), Math.sin(a) * rand(1, 4), rand(1.5, 3), "#8a1a1a", 420));
@@ -581,8 +671,11 @@ class Zombie {
     if (decals.length > 90) decals.shift();
     // drops
     const roll = Math.random();
-    if (roll < 0.10) pickups.push(new Pickup(this.x, this.y, "health"));
-    else if (roll < 0.30) pickups.push(new Pickup(this.x, this.y, "ammo"));
+    if (roll < 0.09) pickups.push(new Pickup(this.x, this.y, "health"));
+    else if (roll < 0.25) pickups.push(new Pickup(this.x, this.y, "ammo"));
+    else if (roll < 0.32) pickups.push(new Pickup(this.x, this.y, "grenade"));
+    else if (roll < 0.355) pickups.push(new Pickup(this.x, this.y, "shield"));
+    else if (roll < 0.375) pickups.push(new Pickup(this.x, this.y, "blast"));
   }
   update(dt) {
     const dx = player.x - this.x, dy = player.y - this.y;
@@ -601,12 +694,19 @@ class Zombie {
 
     this.vx += mvx * this.speed * 0.22 * dt;
     this.vy += mvy * this.speed * 0.22 * dt;
-    // friction / speed cap
+    // friction / speed cap -- steering only. Capping the sum here used to
+    // clamp every knockback impulse down to walking pace, which silently
+    // cancelled bullet and explosion knockback entirely.
     this.vx *= Math.pow(0.86, dt); this.vy *= Math.pow(0.86, dt);
     const sp = Math.hypot(this.vx, this.vy), cap = this.speed * 1.9;
     if (sp > cap) { this.vx = this.vx / sp * cap; this.vy = this.vy / sp * cap; }
 
-    this.x += this.vx * dt; this.y += this.vy * dt;
+    // impulse rides on top and bleeds off on its own
+    this.kx *= Math.pow(0.82, dt); this.ky *= Math.pow(0.82, dt);
+    if (Math.abs(this.kx) < 0.02) this.kx = 0;
+    if (Math.abs(this.ky) < 0.02) this.ky = 0;
+
+    this.x += (this.vx + this.kx) * dt; this.y += (this.vy + this.ky) * dt;
     this.x = clamp(this.x, this.r, W - this.r);
     this.y = clamp(this.y, this.r, H - this.r);
 
@@ -624,7 +724,7 @@ class Zombie {
     if (d < this.r + player.r && game.time - this.lastTouch > this.t.touch) {
       this.lastTouch = game.time;
       player.damage(this.t.dmg);
-      this.vx -= mvx * 3; this.vy -= mvy * 3;
+      this.kx -= mvx * 3; this.ky -= mvy * 3;
     }
   }
   draw(g) {
@@ -670,6 +770,108 @@ class Zombie {
   }
 }
 
+class Grenade {
+  constructor(x, y, vx, vy) {
+    this.x = x; this.y = y; this.vx = vx; this.vy = vy;
+    this.fuse = ITEMS.grenade.fuse;
+    this.dead = false; this.spin = 0;
+  }
+  update(dt) {
+    this.x += this.vx * dt; this.y += this.vy * dt;
+    this.vx *= Math.pow(0.94, dt); this.vy *= Math.pow(0.94, dt);   // skids to a stop
+    this.spin += 0.3 * dt;
+    // bounce off the arena edges instead of sliding out of play
+    if (this.x < 8) { this.x = 8; this.vx = Math.abs(this.vx) * 0.5; }
+    if (this.x > W - 8) { this.x = W - 8; this.vx = -Math.abs(this.vx) * 0.5; }
+    if (this.y < 8) { this.y = 8; this.vy = Math.abs(this.vy) * 0.5; }
+    if (this.y > H - 8) { this.y = H - 8; this.vy = -Math.abs(this.vy) * 0.5; }
+    if (Math.random() < 0.5) {
+      particles.push(new Particle(this.x, this.y, rand(-.3,.3), rand(-.3,.3), rand(1, 2.2), "#6b7a5a", 300));
+    }
+    this.fuse -= 16.6 * dt;
+    if (this.fuse <= 0) {
+      this.dead = true;
+      const g = ITEMS.grenade;
+      explode(this.x, this.y, g.radius, g.dmg, g.knock, "#ffb648", false);
+      SFX.boom();
+    }
+  }
+  draw(g) {
+    g.fillStyle = "rgba(0,0,0,.35)";
+    g.beginPath(); g.ellipse(this.x, this.y + 6, 7, 3.5, 0, 0, TAU); g.fill();
+    g.save(); g.translate(this.x, this.y); g.rotate(this.spin);
+    g.fillStyle = "#3f4a35";
+    g.beginPath(); g.roundRect ? g.roundRect(-5, -6.5, 10, 13, 4) : g.rect(-5, -6.5, 10, 13); g.fill();
+    g.strokeStyle = "#242c1e"; g.lineWidth = 1.5; g.stroke();
+    g.fillStyle = "#8a9678"; g.fillRect(-2, -9, 4, 3);
+    g.restore();
+    // the pin light quickens as the fuse burns down
+    const rate = 90 + this.fuse * 0.5;
+    if (Math.floor(game.time / rate) % 2 === 0) {
+      g.fillStyle = "#ff4d4d";
+      g.beginPath(); g.arc(this.x, this.y, 3, 0, TAU); g.fill();
+    }
+  }
+}
+
+class Shockwave {
+  constructor(x, y, radius, color, thick) {
+    this.x = x; this.y = y; this.max = radius; this.r = radius * 0.12;
+    this.color = color; this.thick = thick || 5;
+    this.life = 460; this.maxLife = 460; this.dead = false;
+  }
+  update(dt) {
+    this.life -= 16.6 * dt;
+    const t = 1 - this.life / this.maxLife;
+    this.r = this.max * (0.12 + 0.88 * Math.sqrt(t));   // fast out, easing wide
+    if (this.life <= 0) this.dead = true;
+  }
+  draw(g) {
+    const a = Math.max(0, this.life / this.maxLife);
+    g.globalAlpha = a;
+    g.strokeStyle = this.color; g.lineWidth = this.thick * a + 1;
+    g.beginPath(); g.arc(this.x, this.y, this.r, 0, TAU); g.stroke();
+    g.globalAlpha = a * 0.16;
+    g.fillStyle = this.color;
+    g.beginPath(); g.arc(this.x, this.y, this.r, 0, TAU); g.fill();
+    g.globalAlpha = 1;
+  }
+}
+
+/* Radial damage with linear falloff -- shared by grenades and the power blast.
+   selfSafe blasts (the player's own nova) never hurt the player; a grenade can,
+   at half damage, so throwing one at your feet is a real mistake. */
+function explode(x, y, radius, dmg, knock, color, selfSafe) {
+  shockwaves.push(new Shockwave(x, y, radius, color, 7));
+  shockwaves.push(new Shockwave(x, y, radius * 0.62, "#ffffff", 3));
+  game.shake = Math.min(26, game.shake + 16);
+  game.flash = Math.max(game.flash, 0.5);
+
+  for (let i = 0; i < 34; i++) {
+    const a = rand(0, TAU), sp = rand(2, 9);
+    particles.push(new Particle(x, y, Math.cos(a) * sp, Math.sin(a) * sp, rand(2, 5.5),
+      pick([color, "#fff3b0", "#ff7a18", "#6b6b6b"]), rand(400, 800)));
+  }
+  decals.push({ x, y, r: radius * 0.34, a: 0.35 });
+  if (decals.length > 90) decals.shift();
+
+  const r2 = radius * radius;
+  for (const z of zombies) {
+    if (z.dead) continue;
+    const d2 = dist2(x, y, z.x, z.y);
+    if (d2 > r2) continue;
+    const d = Math.sqrt(d2);
+    const fall = 1 - (d / radius) * 0.65;           // 100% at centre, 35% at the rim
+    const ux = d > 0.01 ? (z.x - x) / d : rand(-1, 1);
+    const uy = d > 0.01 ? (z.y - y) / d : rand(-1, 1);
+    z.hurt(dmg * fall, ux * knock, uy * knock);
+  }
+  if (!selfSafe) {
+    const d = Math.hypot(player.x - x, player.y - y);
+    if (d < radius) player.damage(Math.round(dmg * (1 - d / radius) * 0.5));
+  }
+}
+
 class Particle {
   constructor(x, y, vx, vy, r, color, life) {
     this.x = x; this.y = y; this.vx = vx; this.vy = vy;
@@ -699,7 +901,16 @@ class Pickup {
     if (this.life <= 0) this.dead = true;
     if (dist2(this.x, this.y, player.x, player.y) < 24 * 24) {
       this.dead = true;
-      if (this.kind === "health") {
+      if (ITEMS[this.kind]) {
+        const it = ITEMS[this.kind];
+        if (player.items[this.kind] >= it.max) {
+          game.addScore(60, this.x, this.y, false);
+          game.toast(it.name + " FULL  +60", it.color);
+        } else {
+          player.items[this.kind]++;
+          game.toast("+1 " + it.name, it.color);
+        }
+      } else if (this.kind === "health") {
         player.hp = Math.min(player.maxHp, player.hp + 25);
         game.toast("+25 HP", "#6ee36e");
       } else {
@@ -722,7 +933,24 @@ class Pickup {
     const blink = this.life < 3000 && Math.floor(this.life / 150) % 2 === 0;
     if (blink) return;
     g.save(); g.translate(this.x, y);
-    if (this.kind === "health") {
+    if (ITEMS[this.kind]) {
+      const it = ITEMS[this.kind];
+      g.fillStyle = "#12160f"; g.fillRect(-10, -10, 20, 20);
+      g.strokeStyle = it.color; g.lineWidth = 2; g.strokeRect(-10, -10, 20, 20);
+      g.fillStyle = it.color;
+      if (this.kind === "grenade") {
+        g.beginPath(); g.arc(0, 1, 5, 0, TAU); g.fill();
+        g.fillRect(-1.5, -8, 3, 4);
+      } else if (this.kind === "shield") {
+        g.beginPath();
+        g.moveTo(0, -7); g.lineTo(6, -4); g.lineTo(6, 2); g.lineTo(0, 7); g.lineTo(-6, 2); g.lineTo(-6, -4);
+        g.closePath(); g.fill();
+      } else {
+        g.beginPath(); g.arc(0, 0, 3, 0, TAU); g.fill();
+        g.lineWidth = 1.6; g.strokeStyle = it.color;
+        g.beginPath(); g.arc(0, 0, 7, 0, TAU); g.stroke();
+      }
+    } else if (this.kind === "health") {
       g.fillStyle = "#0e1a0e"; g.fillRect(-9, -9, 18, 18);
       g.strokeStyle = "#6ee36e"; g.lineWidth = 2; g.strokeRect(-9, -9, 18, 18);
       g.fillStyle = "#6ee36e"; g.fillRect(-6, -2, 12, 4); g.fillRect(-2, -6, 4, 12);
@@ -755,6 +983,7 @@ class FloatText {
 
 /* ---------------- world collections ---------------- */
 let bullets = [], zombies = [], particles = [], pickups = [], floats = [], decals = [], spits = [];
+let grenades = [], shockwaves = [];
 const player = new Player();
 
 /* ---------------- game / wave logic ---------------- */
@@ -765,18 +994,19 @@ const game = {
   wave: 0, toSpawn: 0, spawnTimer: 0, spawnGap: 700,
   waveActive: false, breakTimer: 0,
   combo: 0, comboTimer: 0,
-  shake: 0, redFlash: 0,
+  shake: 0, redFlash: 0, flash: 0,
   best: Number(localStorage.getItem("deadzone_best") || 0),
   banner: null, bannerTime: 0,
 
   reset() {
     bullets = []; zombies = []; particles = []; pickups = []; floats = []; decals = []; spits = [];
+    grenades = []; shockwaves = [];
     player.reset();
     this.score = 0; this.kills = 0; this.wave = 0;
     this.toSpawn = 0; this.spawnTimer = 0;
     this.waveActive = false; this.breakTimer = 1800;
     this.combo = 0; this.comboTimer = 0;
-    this.shake = 0; this.redFlash = 0;
+    this.shake = 0; this.redFlash = 0; this.flash = 0;
     this.banner = "GET READY"; this.bannerTime = 1800;
     this.hintTime = 7000;
   },
@@ -784,7 +1014,13 @@ const game = {
     this.score += n;
     if (x !== undefined) floats.push(new FloatText(x, y - 14, "+" + n, crit ? "#ffd76a" : "#dfe8d6", crit));
   },
-  toast(text, color) { floats.push(new FloatText(player.x, player.y - 26, text, color, true)); },
+  toast(text, color) {
+    // two toasts in the same instant used to overprint into gibberish;
+    // stack anything still fresh
+    let stack = 0;
+    for (const f of floats) if (f.big && f.life > f.maxLife - 300) stack++;
+    floats.push(new FloatText(player.x, player.y - 26 - stack * 21, text, color, true));
+  },
 
   startWave() {
     this.wave++;
@@ -814,6 +1050,10 @@ const game = {
     this.addScore(bonus, player.x, player.y - 40, true);
     this.banner = "WAVE CLEARED  +" + bonus; this.bannerTime = 2200;
     player.hp = Math.min(player.maxHp, player.hp + 15);
+    // one grenade back each wave, and the rarer gear every few waves
+    player.items.grenade = Math.min(ITEMS.grenade.max, player.items.grenade + 1);
+    if (this.wave % 3 === 0) player.items.shield = Math.min(ITEMS.shield.max, player.items.shield + 1);
+    if (this.wave % 4 === 0) player.items.blast = Math.min(ITEMS.blast.max, player.items.blast + 1);
     // top up reserves a little between waves
     for (let i = 1; i < 3; i++) {
       if (player.unlocked[i]) player.reserve[i] = Math.min(WEAPONS[i].reserveMax, player.reserve[i] + (i === 1 ? 10 : 50));
@@ -945,6 +1185,8 @@ function update(dt) {
   for (const p of particles) p.update(dt);
   for (const p of pickups) p.update(dt);
   for (const f of floats) f.update(dt);
+  for (const g of grenades) g.update(dt);
+  for (const w of shockwaves) w.update(dt);
   for (const s of spits) {
     s.x += s.vx * dt; s.y += s.vy * dt; s.life -= 16.6 * dt;
     if (s.life <= 0 || s.x < 0 || s.x > W || s.y < 0 || s.y > H) s.dead = true;
@@ -959,6 +1201,8 @@ function update(dt) {
   pickups = pickups.filter(o => !o.dead);
   floats = floats.filter(o => !o.dead);
   spits = spits.filter(o => !o.dead);
+  grenades = grenades.filter(o => !o.dead);
+  shockwaves = shockwaves.filter(o => !o.dead);
 
   // combo decay
   if (game.comboTimer > 0) { game.comboTimer -= 16.6 * dt; if (game.comboTimer <= 0) game.combo = 0; }
@@ -984,6 +1228,8 @@ function update(dt) {
   if (game.hintTime > 0) game.hintTime -= 16.6 * dt;
   game.shake *= Math.pow(0.88, dt);
   game.redFlash *= Math.pow(0.90, dt);
+  game.flash *= Math.pow(0.84, dt);
+  if (player.shieldFlash > 0) player.shieldFlash -= 16.6 * dt;
 }
 
 /* ---------------- render ---------------- */
@@ -1084,6 +1330,62 @@ function drawHUD(g) {
     g.fillRect(px2 + bw / 2 + 2, ry + bh / 2 - 8, 5, 16);
   }
 
+  // gear slots -- bottom right, near the firing thumb on touch.
+  // Drawn on every device and always clickable, so mouse and tap both work.
+  {
+    const big = TOUCH_UI;
+    const iw = big ? 74 : 62, ih = big ? 56 : 46, ig = 8;
+    const kinds = ["grenade", "shield", "blast"];
+    const totalW = kinds.length * iw + (kinds.length - 1) * ig;
+    const ix0 = W - totalW - 16, iy = H - ih - 14;
+    kinds.forEach((kind, i) => {
+      const it = ITEMS[kind], n = player.items[kind];
+      const bx = ix0 + i * (iw + ig);
+      uiButtons.push({ x: bx, y: iy, w: iw, h: ih, id: "item:" + kind });
+      const usable = n > 0;
+      const active = kind === "shield" && player.shielded;
+
+      g.globalAlpha = usable ? 1 : 0.32;
+      g.fillStyle = active ? "rgba(95,208,255,.22)" : "rgba(0,0,0,.55)";
+      g.fillRect(bx, iy, iw, ih);
+      g.strokeStyle = active ? "#5fd0ff" : (usable ? it.color : "rgba(255,255,255,.22)");
+      g.lineWidth = active ? 2.5 : (usable ? 1.6 : 1);
+      g.strokeRect(bx + .5, iy + .5, iw - 1, ih - 1);
+
+      // icon
+      const cx = bx + iw / 2, cy = iy + ih * 0.38;
+      g.fillStyle = it.color; g.strokeStyle = it.color; g.lineWidth = 1.8;
+      if (kind === "grenade") {
+        g.beginPath(); g.arc(cx, cy + 1, 6, 0, TAU); g.fill();
+        g.fillRect(cx - 1.5, cy - 9, 3, 4);
+      } else if (kind === "shield") {
+        g.beginPath();
+        g.moveTo(cx, cy - 8); g.lineTo(cx + 7, cy - 4); g.lineTo(cx + 7, cy + 3);
+        g.lineTo(cx, cy + 9); g.lineTo(cx - 7, cy + 3); g.lineTo(cx - 7, cy - 4);
+        g.closePath(); g.fill();
+      } else {
+        g.beginPath(); g.arc(cx, cy, 3.2, 0, TAU); g.fill();
+        g.beginPath(); g.arc(cx, cy, 8, 0, TAU); g.stroke();
+      }
+
+      // count, and the key that fires it on a keyboard
+      g.textAlign = "center";
+      g.font = "bold " + (big ? 13 : 11) + "px 'Courier New', monospace";
+      g.fillStyle = "#e9efe4";
+      g.fillText((TOUCH_UI ? "" : it.key + "  ") + "x" + n, cx, iy + ih - 8);
+      g.globalAlpha = 1;
+    });
+
+    // shield countdown above its slot
+    if (player.shielded) {
+      const left = (player.shieldUntil - game.time) / 1000;
+      const bx = ix0 + 1 * (iw + ig);
+      g.fillStyle = "#5fd0ff";
+      g.font = "bold 13px 'Courier New', monospace"; g.textAlign = "center";
+      g.fillText(left.toFixed(1) + "s", bx + iw / 2, iy - 7);
+    }
+  }
+
   // score / wave (right side)
   g.textAlign = "right";
   g.fillStyle = "#e9efe4";
@@ -1172,9 +1474,42 @@ function render() {
     ctx.beginPath(); ctx.arc(s.x, s.y, 8, 0, TAU); ctx.stroke();
   }
 
+  for (const g of grenades) g.draw(ctx);
   for (const z of zombies) z.draw(ctx);
   player.draw(ctx);
+
+  // full-body security layer
+  if (player.shielded) {
+    const left = player.shieldUntil - game.time;
+    const pulse = 0.55 + Math.sin(game.time / 90) * 0.16;
+    const expiring = left < 1600 && Math.floor(left / 140) % 2 === 0;
+    const rr = player.r + 11 + Math.sin(game.time / 130) * 1.6;
+    ctx.save();
+    ctx.globalAlpha = expiring ? 0.28 : pulse;
+    ctx.strokeStyle = "#5fd0ff"; ctx.lineWidth = player.shieldFlash > 0 ? 5 : 2.4;
+    ctx.beginPath(); ctx.arc(player.x, player.y, rr, 0, TAU); ctx.stroke();
+    ctx.globalAlpha = (expiring ? 0.05 : 0.13) + (player.shieldFlash > 0 ? 0.22 : 0);
+    ctx.fillStyle = "#5fd0ff";
+    ctx.beginPath(); ctx.arc(player.x, player.y, rr, 0, TAU); ctx.fill();
+    // hex facets, so it reads as armour rather than a plain circle
+    ctx.globalAlpha = expiring ? 0.14 : 0.34;
+    ctx.lineWidth = 1;
+    for (let i = 0; i < 6; i++) {
+      const a0 = game.time / 900 + i * TAU / 6;
+      ctx.beginPath();
+      ctx.arc(player.x, player.y, rr, a0, a0 + TAU / 12);
+      ctx.stroke();
+    }
+    // remaining-time arc
+    const frac = clamp(left / ITEMS.shield.duration, 0, 1);
+    ctx.globalAlpha = 0.85; ctx.lineWidth = 2.5;
+    ctx.strokeStyle = "#bff0ff";
+    ctx.beginPath(); ctx.arc(player.x, player.y, rr + 5, -Math.PI / 2, -Math.PI / 2 + TAU * frac);
+    ctx.stroke();
+    ctx.restore();
+  }
   for (const b of bullets) b.draw(ctx);
+  for (const w of shockwaves) w.draw(ctx);
   for (const f of floats) f.draw(ctx);
 
   // off-screen zombie indicators
@@ -1193,6 +1528,11 @@ function render() {
 
   ctx.restore();
 
+  // explosion whiteout
+  if (game.flash > 0.01) {
+    ctx.fillStyle = "rgba(255,245,220," + (game.flash * 0.34).toFixed(3) + ")";
+    ctx.fillRect(0, 0, W, H);
+  }
   // damage flash
   if (game.redFlash > 0.01) {
     ctx.fillStyle = "rgba(179,18,27," + (game.redFlash * 0.4).toFixed(3) + ")";
