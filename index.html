@@ -600,6 +600,13 @@ const SFX = {
   headshot:() => { blip("square", 1500, 0.05, 0.05, 700); noise(0.06, 0.10, 2600); },
   headKill:() => { noise(0.16, 0.16, 900); blip("triangle", 300, 0.14, 0.08, 70); },
   crit:    () => blip("triangle", 1150, 0.07, 0.045, 1650),
+  coin:    () => { blip("square", 980, 0.05, 0.045, 1500); setTimeout(()=>blip("square", 1450, 0.06, 0.04), 55); },
+  gem:     () => { blip("sine", 900, 0.14, 0.07, 1900); setTimeout(()=>blip("sine", 1500, 0.20, 0.06, 2400), 110);
+                   setTimeout(()=>blip("triangle", 2100, 0.22, 0.05), 210); },
+  heart:   () => { blip("triangle", 520, 0.12, 0.07, 780); setTimeout(()=>blip("triangle", 780, 0.16, 0.06, 1040), 110); },
+  boost:   () => { blip("sawtooth", 220, 0.22, 0.08, 900); noise(0.14, 0.08, 1400); },
+  timewarp:() => { blip("sine", 900, 0.45, 0.07, 180); },
+  revive:  () => { blip("sawtooth", 120, 0.5, 0.12, 460); setTimeout(()=>blip("triangle", 600, 0.3, 0.08, 1000), 200); },
   kill:    () => { blip("triangle", 160, 0.16, 0.09, 50); noise(0.12, 0.08, 500); },
   hurt:    () => blip("sawtooth", 180, 0.22, 0.12, 60),
   reload:  () => { blip("square", 500, 0.05, 0.05); setTimeout(() => blip("square", 380, 0.07, 0.05), 110); },
@@ -775,7 +782,7 @@ const Progress = {
       worlds[w.id] = { unlocked: UNLOCK_ALL || w.id === 1, completed: false, introSeen: false, stages };
     }
     return { version: 1, worlds, highestWave: 0, weapons: ["pistol"], abilities: [],
-             upgrades: {}, seenMagnet: false };
+             upgrades: {}, seenMagnet: false, coins: 0, gems: 0 };
   },
   load() {
     try {
@@ -835,6 +842,10 @@ const Progress = {
       }
     }
     base.seenMagnet = !!saved.seenMagnet;
+    // currencies are permanent and separate; a save from before they existed
+    // simply starts at zero rather than losing anything else
+    base.coins = Math.max(0, saved.coins | 0);
+    base.gems  = Math.max(0, saved.gems  | 0);
     base.weapons = ["pistol"];
     if (Array.isArray(saved.weapons)) {
       for (const id of saved.weapons) {
@@ -879,6 +890,10 @@ const Progress = {
     this.save();
     return true;
   },
+  /* Currency is banked immediately on pickup and never rolled back -- not on
+     death, not on a stage restart, not on a world change. */
+  addCoins(n) { this.data.coins = Math.max(0, (this.data.coins | 0) + n); this.save(); return this.data.coins; },
+  addGems(n)  { this.data.gems  = Math.max(0, (this.data.gems  | 0) + n); this.save(); return this.data.gems; },
   hasAbility(id) { return (this.data.abilities || []).includes(id); },
   unlockAbility(id) {
     if (this.hasAbility(id)) return false;
@@ -2244,12 +2259,76 @@ const MAGNET_CONFIG = {
   drop: { normal: 0.035, brute: 0.09, boss: 1.0 }   // spawn chance by enemy class
 };
 
+/* ================= VALUABLE DROPS =================
+   Health, ammo and shield keep the drop rates they always had. The new
+   collectibles roll separately, exactly like the magnet already does, so
+   nothing here can push an existing drop out of the table. */
+const DROP_CONFIG = {
+  heart:       0.015,
+  coins:       0.08,
+  damageBoost: 0.025,
+  slowMotion:  0.015,
+  rareGem:     0.003
+};
+
+/* Per-type multipliers on the rolls above (spec 9). A missing entry means
+   1x, so a new enemy type needs no change here. */
+const DROP_BIAS = {
+  walker:  { },
+  runner:  { coins: 1.4 },
+  brute:   { coins: 1.8, damageBoost: 2.0 },
+  tank:    { coins: 2.2, damageBoost: 2.0, rareGem: 2.0 },
+  spitter: { slowMotion: 2.0 },
+  screamer:{ slowMotion: 1.6 },
+  stalker: { rareGem: 1.5 }
+};
+
+/* A boss is the one guaranteed payday. Deliberately not "everything at
+   once": coins and a heart are certain, the rest are good odds. */
+const BOSS_DROPS = {
+  coins: 1.0, heart: 1.0, damageBoost: 0.7, slowMotion: 0.5, rareGem: 0.35
+};
+
+const LIFE_CONFIG = {
+  startingLives: 3,
+  maxLives: 9,
+  reviveHp: 0.6,        // fraction of max HP restored on a revive
+  reviveInvuln: 2200,   // ms of grace so you are not killed again instantly
+  reviveClearRadius: 190
+};
+
+const COIN_CONFIG = { minValue: 5, maxValue: 25, bossBonus: 3 };   // bossBonus = value multiplier
+const GEM_CONFIG  = { value: 100 };
+
+const DAMAGE_BOOST_CONFIG = { duration: 10000, multiplier: 2.0 };
+const SLOW_MOTION_CONFIG  = { duration: 6000, timeScale: 0.45 };
+
 const POWERUPS = {
   magnet: {
     name: "MAGNET", color: "#4fd2ff", glow: "rgba(79,210,255,",
     duration: MAGNET_CONFIG.duration,
+    sfx: "magnet",
     onActivate() { game.toast("MAGNET ACTIVATED", "#4fd2ff"); },
     onRefill()   { game.toast("MAGNET REFILLED", "#4fd2ff"); }
+  },
+  damage: {
+    name: "DAMAGE BOOST", color: "#ff7a18", glow: "rgba(255,122,24,",
+    duration: DAMAGE_BOOST_CONFIG.duration,
+    sfx: "boost",
+    onActivate() { game.toast("DAMAGE BOOST  x" + DAMAGE_BOOST_CONFIG.multiplier.toFixed(1), "#ff7a18"); },
+    onRefill()   { game.toast("DAMAGE BOOST REFILLED", "#ff7a18"); }
+  },
+  /* Slow motion is a POWERUP for the HUD and the refill rule, but its clock
+     is NOT game.time: game.time is itself slowed, so a duration measured in
+     it would stretch the effect to fit. It drives the one real-time scale
+     the loop already owns instead -- see triggerSlowMo. */
+  slowmo: {
+    name: "SLOW MOTION", color: "#a98fd0", glow: "rgba(169,143,208,",
+    duration: SLOW_MOTION_CONFIG.duration,
+    realTime: true,
+    sfx: "timewarp",
+    onActivate() { game.toast("SLOW MOTION  " + Math.round(SLOW_MOTION_CONFIG.timeScale * 100) + "%", "#a98fd0"); },
+    onRefill()   { game.toast("SLOW MOTION REFILLED", "#a98fd0"); }
   }
 };
 
@@ -2259,13 +2338,32 @@ function activatePowerup(key) {
   if (!pu) return;
   const already = powerupActive(key);
   const dur = (key === "magnet" && player.magnetDur) ? player.magnetDur : pu.duration;
-  player.powerups[key] = game.time + dur;
+  if (pu.realTime) {
+    // refill to full, never a second stacked effect and never a compounded
+    // time scale -- triggerSlowMo owns the single authoritative value
+    triggerSlowMo(dur, SLOW_MOTION_CONFIG.timeScale);
+  } else {
+    player.powerups[key] = game.time + dur;
+  }
   if (already) { if (pu.onRefill) pu.onRefill(); }
   else if (pu.onActivate) pu.onActivate();
-  SFX.magnet();
+  if (SFX[pu.sfx]) SFX[pu.sfx]();
 }
-function powerupActive(key) { return game.time < (player.powerups[key] || 0); }
-function powerupLeft(key) { return Math.max(0, (player.powerups[key] || 0) - game.time); }
+function powerupActive(key) {
+  const pu = POWERUPS[key];
+  if (pu && pu.realTime) return slowMoLeft > 0;
+  return game.time < (player.powerups[key] || 0);
+}
+function powerupLeft(key) {
+  const pu = POWERUPS[key];
+  if (pu && pu.realTime) return Math.max(0, slowMoLeft);
+  return Math.max(0, (player.powerups[key] || 0) - game.time);
+}
+
+/* The single weapon damage multiplier. Every weapon damage path multiplies
+   by this one value, so the boost can never be applied twice and never
+   touches a saved upgrade level. */
+function damageMul() { return powerupActive("damage") ? DAMAGE_BOOST_CONFIG.multiplier : 1; }
 
 /* Which pickups a magnet may pull. Zombies, bosses, bullets, spits, grenades
    and props are deliberately absent -- only collectibles move. */
@@ -2476,8 +2574,10 @@ class Projectile {
     if (this.dead) return;
     this.dead = true;
     const c = this.cfg;
-    // selfSafe: player-fired explosives never hurt the player
-    explode(this.x, this.y, c.radius, c.blast, c.knock, c.color, true);
+    // selfSafe: player-fired explosives never hurt the player.
+    // Explosive weapons carry their damage in the shell rather than through
+    // damageEnemy, so the same one multiplier is applied here too.
+    explode(this.x, this.y, c.radius, c.blast * damageMul(), c.knock, c.color, true);
     SFX.boom();
     game.shake = Math.min(30, game.shake + (c.radius > 180 ? 22 : 12));
   }
@@ -2552,6 +2652,16 @@ function floatAllowed(kind) {
   return true;
 }
 
+/* Shared collection sparkle, so every valuable pops the same way and no
+   pickup grows its own particle code. */
+function pickupBurst(x, y, color, n) {
+  for (let i = 0; i < fxCount(n); i++) {
+    const a = rand(0, TAU), sp = rand(1.2, 4.5);
+    particles.push(new Particle(x, y, Math.cos(a) * sp, Math.sin(a) * sp,
+      rand(1.6, 3.4), pick([color, "#ffffff"]), rand(320, 620)));
+  }
+}
+
 /* Directional impact spray. `ux,uy` is the direction the shot was travelling,
    so debris continues away from the shooter rather than puffing symmetrically. */
 function impactBurst(x, y, ux, uy, n, colors, speed, life) {
@@ -2598,14 +2708,23 @@ function noteKill() {
    frame delta in one place, so every timer stays consistent, and it is
    decremented inside update() so a pause freezes it like everything else. */
 let slowMoLeft = 0;
-function triggerSlowMo(ms) {
-  slowMoLeft = Math.max(slowMoLeft, ms || COMBAT_FEEDBACK_CONFIG.slowMo.duration);
+let slowMoScale = COMBAT_FEEDBACK_CONFIG.slowMo.scale;
+/* ms is real time, never game time -- the loop decrements it with the raw
+   frame delta, so the effect cannot stretch itself. The longer of two
+   overlapping sources owns the scale; scales are never multiplied. */
+function triggerSlowMo(ms, scale) {
+  const d = ms || COMBAT_FEEDBACK_CONFIG.slowMo.duration;
+  if (d >= slowMoLeft) slowMoScale = scale || COMBAT_FEEDBACK_CONFIG.slowMo.scale;
+  slowMoLeft = Math.max(slowMoLeft, d);
 }
 
 /* Shared damage application so every mode gets headshots and status alike. */
 function damageEnemy(z, dmg, kx, ky, weapon, hitX, hitY) {
   const C = COMBAT_FEEDBACK_CONFIG;
-  let out = dmg;
+  // the temporary boost multiplies here, at the one shared damage entry
+  // point, so it applies to every weapon and every enemy type without
+  // touching a single saved upgrade level
+  let out = dmg * damageMul();
   let head = false;
   if (weapon && weapon.headMul && hitX !== undefined) {
     const hx = z.x + Math.cos(z.angle) * z.r * 0.45;
@@ -3123,6 +3242,7 @@ class Player {
     this.shieldFlash = 0;      // brief flare when it absorbs a hit
     this.blastReady = 0;       // cooldown gate so one click is one blast
     this.powerups = {};        // key -> expiry timestamp (see POWERUPS)
+    this.lives = LIFE_CONFIG.startingLives;   // run-scoped, not saved
     // upgrade-derived stats; applyUpgrades() fills these from the save
     this.wstats = null;
     this.armor = 0; this.staminaMax = 100; this.staminaRegen = 0.30;
@@ -3328,8 +3448,36 @@ class Player {
       const a = rand(0, TAU);
       particles.push(new Particle(this.x, this.y, Math.cos(a) * rand(1, 5), Math.sin(a) * rand(1, 5), rand(2, 4), "#c1121f", 600));
     }
-    if (this.hp <= 0) { this.hp = 0; game.over(); }
+    if (this.hp <= 0) {
+      this.hp = 0;
+      // spend a life and get back up; only a run with none left is over
+      if (this.lives > 0) this.revive();
+      else game.over();
+    }
   }
+  /* One life, one revive. Called only from damage(), which has already
+     zeroed hp, so it cannot fire twice for the same death. */
+  revive() {
+    this.lives--;
+    this.hp = Math.max(1, Math.round(this.maxHp * LIFE_CONFIG.reviveHp));
+    this.invuln = LIFE_CONFIG.reviveInvuln;
+    this.shieldUntil = 0;
+    // shove the pack off so the grace period is not spent being re-bitten
+    const r2 = LIFE_CONFIG.reviveClearRadius * LIFE_CONFIG.reviveClearRadius;
+    for (const z of zombies) {
+      if (z.dead || z.isBoss) continue;
+      const d2 = dist2(this.x, this.y, z.x, z.y);
+      if (d2 > r2) continue;
+      const d = Math.sqrt(d2) || 1;
+      z.kx += (z.x - this.x) / d * 22 / z.mass;
+      z.ky += (z.y - this.y) / d * 22 / z.mass;
+    }
+    explode(this.x, this.y, LIFE_CONFIG.reviveClearRadius, 0, 0, "#ff5a7a", true);
+    game.toast("EXTRA LIFE USED  \u00b7  " + this.lives + " LEFT", "#ff5a7a");
+    game.redFlash = 0.8;
+    SFX.revive();
+  }
+
   draw(g) {
     const rec = this.recoil;
     const ax = Math.cos(this.angle), ay = Math.sin(this.angle);
@@ -3566,6 +3714,21 @@ class Zombie {
     if (Math.random() < MAGNET_CONFIG.drop[tier]) {
       pickups.push(new Pickup(this.x, this.y, "magnet"));
     }
+    // Valuables roll on their own, so the health / ammo / shield table below
+    // keeps exactly the rates it always had. Boss drops are a fixed table.
+    const bias = DROP_BIAS[this.type] || {};
+    const wants = (k) => this.isBoss ? Math.random() < BOSS_DROPS[k]
+                                     : Math.random() < DROP_CONFIG[k] * (bias[k] || 1);
+    if (wants("coins")) {
+      const v = randInt(COIN_CONFIG.minValue, COIN_CONFIG.maxValue) * (this.isBoss ? COIN_CONFIG.bossBonus : 1);
+      const pk = new Pickup(this.x, this.y, "coins"); pk.value = v; pickups.push(pk);
+    }
+    if (wants("rareGem"))    pickups.push(new Pickup(this.x, this.y, "gem"));
+    if (wants("damageBoost"))pickups.push(new Pickup(this.x, this.y, "damage"));
+    if (wants("slowMotion")) pickups.push(new Pickup(this.x, this.y, "slowmo"));
+    if (wants("heart") && player.lives < LIFE_CONFIG.maxLives)
+      pickups.push(new Pickup(this.x, this.y, "heart"));
+
     const roll = Math.random();
     if (roll < 0.09) pickups.push(new Pickup(this.x, this.y, "health"));
     else if (roll < 0.22) pickups.push(new Pickup(this.x, this.y, "ammo"));
@@ -4142,6 +4305,10 @@ class Pickup {
     this.vx = 0; this.vy = 0; this.magnetized = false;
   }
   update(dt) {
+    // Collected or expired means finished. Without this a pickup that is
+    // dead but not yet filtered out of the array could be updated again,
+    // still be inside the pickup radius, and pay out a second time.
+    if (this.dead) return;
     this.life -= 16.6 * dt; this.bob += 0.09 * dt;
     if (this.life <= 0) this.dead = true;
 
@@ -4180,6 +4347,36 @@ class Pickup {
         }
         activatePowerup(this.kind);
         return;                          // its own sound already played
+      }
+      if (this.kind === "coins") {
+        const v = this.value || COIN_CONFIG.minValue;
+        Progress.addCoins(v);
+        game.toast("+" + v + " COINS", "#ffd76a");
+        pickupBurst(this.x, this.y, "#ffd76a", 8);
+        SFX.coin();
+        return;
+      }
+      if (this.kind === "gem") {
+        Progress.addGems(GEM_CONFIG.value);
+        game.toast("+" + GEM_CONFIG.value + " GEMS", "#8cf0ff");
+        pickupBurst(this.x, this.y, "#8cf0ff", 18);
+        game.flash = Math.max(game.flash, 0.30);
+        addShake(4);
+        SFX.gem();
+        return;
+      }
+      if (this.kind === "heart") {
+        // capped, and the cap is checked here as well as at spawn time
+        if (player.lives < LIFE_CONFIG.maxLives) {
+          player.lives++;
+          game.toast("+1 LIFE  \u00b7  " + player.lives, "#ff5a7a");
+        } else {
+          game.addScore(150, this.x, this.y, true);
+          game.toast("LIVES FULL  +150", "#ff5a7a");
+        }
+        pickupBurst(this.x, this.y, "#ff5a7a", 12);
+        SFX.heart();
+        return;
       }
       if (ITEMS[this.kind]) {
         const it = ITEMS[this.kind];
@@ -4229,6 +4426,62 @@ class Pickup {
       g.restore();
     }
     g.save(); g.translate(this.x, y);
+    // Each valuable has its own silhouette, not just its own colour, so it
+    // stays readable on a small screen. All procedural -- no assets.
+    if (this.kind === "coins" || this.kind === "gem" || this.kind === "heart") {
+      const pulse = 0.55 + Math.sin(game.time / 180) * 0.45;
+      const col = this.kind === "coins" ? "#ffd76a" : (this.kind === "gem" ? "#8cf0ff" : "#ff5a7a");
+      g.globalAlpha = 0.16 + pulse * 0.20;                       // halo
+      g.fillStyle = col;
+      g.beginPath(); g.arc(0, 0, (this.kind === "gem" ? 18 : 14) + pulse * 4, 0, TAU); g.fill();
+      g.globalAlpha = 1;
+
+      if (this.kind === "coins") {
+        // spins by squashing horizontally, so it reads as a turning disc
+        const spin = Math.abs(Math.cos(game.time / 220));
+        g.save(); g.scale(0.25 + spin * 0.75, 1);
+        g.fillStyle = "#c9a227";
+        g.beginPath(); g.arc(0, 0, 8, 0, TAU); g.fill();
+        g.fillStyle = "#ffd76a";
+        g.beginPath(); g.arc(0, 0, 6, 0, TAU); g.fill();
+        g.fillStyle = "#c9a227"; g.font = "bold 9px 'Courier New', monospace";
+        g.textAlign = "center"; g.textBaseline = "middle";
+        if (spin > 0.5) g.fillText("$", 0, 0.5);
+        g.textBaseline = "alphabetic";
+        g.restore();
+      } else if (this.kind === "gem") {
+        g.rotate(Math.sin(game.time / 520) * 0.35);
+        g.fillStyle = "#8cf0ff";                                 // faceted crystal
+        g.beginPath();
+        g.moveTo(0, -11); g.lineTo(7, -3); g.lineTo(4, 9); g.lineTo(-4, 9); g.lineTo(-7, -3);
+        g.closePath(); g.fill();
+        g.fillStyle = "rgba(255,255,255,.55)";
+        g.beginPath(); g.moveTo(0, -11); g.lineTo(7, -3); g.lineTo(0, 0); g.closePath(); g.fill();
+        g.strokeStyle = "rgba(255,255,255,.8)"; g.lineWidth = 1;
+        g.beginPath(); g.moveTo(0, -11); g.lineTo(0, 9); g.moveTo(-7, -3); g.lineTo(7, -3); g.stroke();
+        // sparkle
+        const sp = (game.time / 260) % 1;
+        g.globalAlpha = 1 - sp;
+        g.strokeStyle = "#ffffff"; g.lineWidth = 1.4;
+        const sr = 10 + sp * 9;
+        g.beginPath(); g.moveTo(-sr, 0); g.lineTo(-sr + 4, 0); g.moveTo(sr - 4, 0); g.lineTo(sr, 0);
+        g.moveTo(0, -sr); g.lineTo(0, -sr + 4); g.moveTo(0, sr - 4); g.lineTo(0, sr); g.stroke();
+        g.globalAlpha = 1;
+      } else {
+        const beat = 1 + Math.sin(game.time / 150) * 0.10;       // pulse like a heartbeat
+        g.scale(beat, beat);
+        g.fillStyle = "#ff5a7a";
+        g.beginPath();
+        g.moveTo(0, 8);
+        g.bezierCurveTo(-11, -1, -6, -10, 0, -4);
+        g.bezierCurveTo(6, -10, 11, -1, 0, 8);
+        g.closePath(); g.fill();
+        g.fillStyle = "rgba(255,255,255,.45)";
+        g.beginPath(); g.ellipse(-3, -2.5, 2, 1.4, -0.6, 0, TAU); g.fill();
+      }
+      g.restore();
+      return;
+    }
     if (POWERUPS[this.kind]) {
       const pu = POWERUPS[this.kind];
       const pulse = 0.55 + Math.sin(game.time / 180) * 0.45;
@@ -4236,6 +4489,44 @@ class Pickup {
       g.fillStyle = pu.color;
       g.beginPath(); g.arc(0, 0, 16 + pulse * 4, 0, TAU); g.fill();
       g.globalAlpha = 1;
+      if (this.kind === "damage") {
+        // rising flame
+        g.rotate(Math.sin(game.time / 300) * 0.12);
+        g.fillStyle = "#ff7a18";
+        g.beginPath();
+        g.moveTo(0, -12); g.bezierCurveTo(7, -4, 8, 3, 0, 10);
+        g.bezierCurveTo(-8, 3, -7, -4, 0, -12); g.closePath(); g.fill();
+        g.fillStyle = "#ffd76a";
+        g.beginPath();
+        g.moveTo(0, -5); g.bezierCurveTo(4, -1, 4, 4, 0, 8);
+        g.bezierCurveTo(-4, 4, -4, -1, 0, -5); g.closePath(); g.fill();
+        g.restore();
+        return;
+      }
+      if (this.kind === "slowmo") {
+        // hourglass, with a ripple ring that keeps expanding
+        const sp = (game.time / 700) % 1;
+        g.globalAlpha = (1 - sp) * 0.6;
+        g.strokeStyle = pu.color; g.lineWidth = 1.6;
+        g.beginPath(); g.arc(0, 0, 9 + sp * 12, 0, TAU); g.stroke();
+        g.globalAlpha = 1;
+        g.fillStyle = "#cbb6e8";
+        g.beginPath();
+        g.moveTo(-7, -10); g.lineTo(7, -10); g.lineTo(1, 0); g.lineTo(7, 10);
+        g.lineTo(-7, 10); g.lineTo(-1, 0); g.closePath(); g.fill();
+        g.fillStyle = "#7a5ea8";                     // sand, draining
+        const drain = (game.time / 1400) % 1;
+        g.beginPath(); g.moveTo(-5.4, -8.4); g.lineTo(5.4, -8.4);
+        g.lineTo(0.7, -0.6 - 0.1); g.lineTo(-0.7, -0.6); g.closePath();
+        g.save(); g.globalAlpha = 1 - drain; g.fill(); g.restore();
+        g.beginPath(); g.moveTo(-5.4, 8.4); g.lineTo(5.4, 8.4);
+        g.lineTo(0.7, 1.4); g.lineTo(-0.7, 1.4); g.closePath();
+        g.save(); g.globalAlpha = drain; g.fill(); g.restore();
+        g.strokeStyle = "#e8dcf7"; g.lineWidth = 1.4;
+        g.beginPath(); g.moveTo(-8, -10); g.lineTo(8, -10); g.moveTo(-8, 10); g.lineTo(8, 10); g.stroke();
+        g.restore();
+        return;
+      }
       g.rotate(Math.sin(game.time / 420) * 0.25);   // slow float
       // horseshoe body
       g.strokeStyle = "#d8d8e0"; g.lineWidth = 5.5; g.lineCap = "butt";
@@ -4407,7 +4698,8 @@ const game = {
     grenades = []; shockwaves = []; corpses = [];
     projectiles = []; flames = []; arcs = [];
     resetAirStrike();
-    slowMoLeft = 0; killWindow.length = 0;
+    slowMoLeft = 0; slowMoScale = COMBAT_FEEDBACK_CONFIG.slowMo.scale;
+    killWindow.length = 0;
     for (const k in floatGate) delete floatGate[k];
     player.reset();
     this.score = 0; this.kills = 0; this.wave = 0;
@@ -5521,6 +5813,23 @@ function drawHUD(g) {
       "HP " + Math.ceil(player.hp));
   // stamina
   bar(g, 16, 38, 140, 7, player.stamina / player.staminaMax, "#4aa3c7", "rgba(0,0,0,.5)");
+  // lives -- small hearts beside the bars, where survival state already lives
+  {
+    const n = Math.min(player.lives, 5);
+    for (let i = 0; i < n; i++) {
+      const hx = 166 + i * 15, hy = 41;
+      g.fillStyle = "#ff5a7a";
+      g.beginPath();
+      g.moveTo(hx, hy + 4);
+      g.bezierCurveTo(hx - 6, hy - 1.5, hx - 3.2, hy - 6, hx, hy - 2);
+      g.bezierCurveTo(hx + 3.2, hy - 6, hx + 6, hy - 1.5, hx, hy + 4);
+      g.closePath(); g.fill();
+    }
+    if (player.lives > 5) {
+      g.fillStyle = "#ff5a7a"; g.font = "bold 11px 'Courier New', monospace"; g.textAlign = "left";
+      g.fillText("x" + player.lives, 166 + 5 * 15 + 2, 44);
+    }
+  }
 
   // weapon + ammo
   const w = player.weapon;
@@ -5739,17 +6048,34 @@ function drawHUD(g) {
       // smooth drain bar
       g.fillStyle = pu.glow + "0.30)";
       g.fillRect(bx + 2, by + 2, (bw - 4) * frac, bh - 4);
-      // small magnet glyph
+      // one glyph per effect, so the panels are told apart at a glance
       g.save(); g.translate(bx + 17, by + bh / 2);
-      g.strokeStyle = "#d8d8e0"; g.lineWidth = 3.4;
-      g.beginPath(); g.arc(0, 1, 4.2, Math.PI, 0); g.stroke();
-      g.beginPath(); g.moveTo(-4.2, 1); g.lineTo(-4.2, 6); g.moveTo(4.2, 1); g.lineTo(4.2, 6); g.stroke();
-      g.strokeStyle = "#e8484f"; g.beginPath(); g.moveTo(-4.2, 4); g.lineTo(-4.2, 6.5); g.stroke();
-      g.strokeStyle = "#4fa8ff"; g.beginPath(); g.moveTo(4.2, 4); g.lineTo(4.2, 6.5); g.stroke();
+      if (key === "damage") {
+        g.fillStyle = "#ff7a18";
+        g.beginPath(); g.moveTo(0, -7); g.bezierCurveTo(4.5, -2, 5, 2, 0, 6);
+        g.bezierCurveTo(-5, 2, -4.5, -2, 0, -7); g.closePath(); g.fill();
+        g.fillStyle = "#ffd76a";
+        g.beginPath(); g.moveTo(0, -2); g.bezierCurveTo(2.4, 0, 2.4, 2.6, 0, 4.6);
+        g.bezierCurveTo(-2.4, 2.6, -2.4, 0, 0, -2); g.closePath(); g.fill();
+      } else if (key === "slowmo") {
+        g.fillStyle = "#cbb6e8";
+        g.beginPath(); g.moveTo(-5, -6.5); g.lineTo(5, -6.5); g.lineTo(0.8, 0); g.lineTo(5, 6.5);
+        g.lineTo(-5, 6.5); g.lineTo(-0.8, 0); g.closePath(); g.fill();
+        g.strokeStyle = "#e8dcf7"; g.lineWidth = 1.3;
+        g.beginPath(); g.moveTo(-6, -6.5); g.lineTo(6, -6.5); g.moveTo(-6, 6.5); g.lineTo(6, 6.5); g.stroke();
+      } else {
+        g.strokeStyle = "#d8d8e0"; g.lineWidth = 3.4;
+        g.beginPath(); g.arc(0, 1, 4.2, Math.PI, 0); g.stroke();
+        g.beginPath(); g.moveTo(-4.2, 1); g.lineTo(-4.2, 6); g.moveTo(4.2, 1); g.lineTo(4.2, 6); g.stroke();
+        g.strokeStyle = "#e8484f"; g.beginPath(); g.moveTo(-4.2, 4); g.lineTo(-4.2, 6.5); g.stroke();
+        g.strokeStyle = "#4fa8ff"; g.beginPath(); g.moveTo(4.2, 4); g.lineTo(4.2, 6.5); g.stroke();
+      }
       g.restore();
       g.fillStyle = pu.color;
       g.font = "bold 12px 'Courier New', monospace"; g.textAlign = "left";
-      g.fillText(pu.name, bx + 32, by + 13);
+      g.fillText(pu.name + (key === "damage" ? "  x" + DAMAGE_BOOST_CONFIG.multiplier.toFixed(1)
+                          : key === "slowmo" ? "  " + Math.round(SLOW_MOTION_CONFIG.timeScale * 100) + "%" : ""),
+                  bx + 32, by + 13);
       g.fillStyle = "#e9efe4";
       g.font = "bold 13px 'Courier New', monospace";
       g.fillText((left / 1000).toFixed(1) + "s", bx + 32, by + 25);
@@ -5776,6 +6102,16 @@ function drawHUD(g) {
   const remaining = game.waveActive ? (game.toSpawn + zombies.length) : 0;
   g.fillText(game.waveActive ? ("LEFT " + remaining) : ("NEXT IN " + Math.max(0, Math.ceil(game.breakTimer / 1000)) + "s"), rx, 102);
   g.fillText("KILLS " + game.kills, rx, 120);
+  // currencies, compact and always in the same place
+  {
+    const coins = Progress.data.coins | 0, gems = Progress.data.gems | 0;
+    g.font = "bold 12px 'Courier New', monospace";
+    g.fillStyle = "#ffd76a";
+    const coinTxt = "\u25CF " + coins.toLocaleString();
+    g.fillText(coinTxt, rx, 156);
+    g.fillStyle = "#8cf0ff";
+    g.fillText("\u25C6 " + gems.toLocaleString(), rx - g.measureText(coinTxt).width - 14, 156);
+  }
 
   // combo
   if (game.combo >= 3) {
@@ -6181,7 +6517,7 @@ function frame(now) {
     // because it burns down here it freezes with the rest on pause.
     if (slowMoLeft > 0) {
       slowMoLeft = Math.max(0, slowMoLeft - dt * 16.6667);
-      update(dt * COMBAT_FEEDBACK_CONFIG.slowMo.scale);
+      update(dt * slowMoScale);
     } else {
       update(dt);
     }

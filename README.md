@@ -329,6 +329,57 @@ scaled by wave number and remaining health. Best score persists in
 
 **Drops** — dead zombies sometimes leave medkits (+25 HP) or ammo boxes.
 
+## Collectibles
+
+Health, ammo, and the gear charges keep exactly the drop rates they always
+had. The valuables below roll **separately**, the way the magnet already
+did, so nothing new can push an existing drop out of the table.
+
+| Drop | What it does | Base chance |
+|---|---|---|
+| ❤ **Heart** | +1 life (never HP) | 1.5% |
+| ● **Coins** | 5–25 banked currency | 8% |
+| 🔥 **Damage boost** | ×2 weapon damage, 10s | 2.5% |
+| ⧗ **Slow motion** | game runs at 45%, 6s | 1.5% |
+| ◆ **Rare gem** | +100 gems | 0.3% |
+
+Each has its own silhouette, not just its own colour — a beating heart, a
+spinning coin, a flame, a draining hourglass, a faceted crystal — so they
+stay apart on a small screen. Stronger enemies bias the rolls (`DROP_BIAS`):
+brutes drop more coins and boosts, spitters more slow motion, stalkers more
+gems. A boss is the one guaranteed payday (`BOSS_DROPS`) — coins and a heart
+every time, the rest on good odds, deliberately *not* everything at once.
+
+**Lives** are run-scoped, not saved: you start with 3. Dying with a life in
+hand spends it and revives you in place at 60% health with 2.2s of grace and
+a shove that clears the pack, instead of ending the run; at zero it is the
+normal game-over flow, and Retry is untouched. Capped at 9 — a heart at the
+cap pays score instead. Works the same in campaign and endless.
+
+**Coins and gems are separate currencies**, banked the instant you touch the
+pickup and never rolled back — not on death, not on a stage restart, not on
+a world change. They live in the existing campaign save (`coins`, `gems`); a
+save written before they existed loads with zero and keeps everything else.
+
+**Damage boost** multiplies through `damageMul()`, the one value every
+weapon damage path reads — the shared `damageEnemy()` and the shell/rocket
+blast. It never writes to a saved upgrade level, and a second pickup while
+one is running refills the timer without touching the multiplier (measured:
+26 → 52 damage, still 52 after a second pickup, back to 26 on expiry).
+
+**Slow motion** drives the same single real-time scale the loop already
+owned for its combat flourishes, so there is one time scale and it is never
+compounded. Gameplay reads the scaled delta; the effect's own countdown uses
+*real* time, because a duration measured in the slowed clock would stretch
+itself (measured: 6000ms configured, 6006ms elapsed). Input, menus and pause
+stay on real time, and pausing freezes it like everything else. It is a
+pickup, not a fifth ability — it adds no button and spends no charge.
+
+Every collectible is magnetic, including all five new ones; zombies, bosses,
+bullets and spits are not. Tuning lives in `DROP_CONFIG`, `DROP_BIAS`,
+`BOSS_DROPS`, `LIFE_CONFIG`, `COIN_CONFIG`, `GEM_CONFIG`,
+`DAMAGE_BOOST_CONFIG` and `SLOW_MOTION_CONFIG`.
+
 ## Power-ups
 
 **Magnet** — a horseshoe magnet dropped by zombies. Collecting it activates
