@@ -235,6 +235,31 @@ Timed effects live in a `POWERUPS` registry that the pickup, HUD and drop
 systems are generic over, so a future speed or damage boost is a new entry
 plus its art — not a change to the pickup system.
 
+## Upgrades
+
+Every campaign stage opens with **CHOOSE YOUR UPGRADE** — three cards, pick
+one, then the stage starts. The game is frozen behind the popup (`game.state`
+is `"upgrade"`, and `update()` only runs in `"play"`), so wave 1 cannot begin
+until you choose. It appears once per stage, never between waves.
+
+The three cards are drawn only from upgrades you can actually use. An entry
+declares either a `weapon` (must be unlocked, read from live progression —
+not from the weapon table's existence) or a `feature` (must be active), and
+anything already at level 5 leaves the pool. The remainder is shuffled and
+three are taken, preferring three different categories.
+
+Categories: per-weapon damage / fire rate / reload / magazine / accuracy /
+ammo capacity, plus weapon-specific ones (shotgun pellets and knockback,
+sniper crit damage, blast radius and shell speed, burn duration, tesla chain
+count and range, freeze duration); player health, armor, move speed, stamina
+and sprint recovery; crit chance, crit damage and knockback; ammo and medkit
+potency; magnet duration and range.
+
+Armor and crit chance are hard-capped at 20%. Magnet upgrades only appear
+once you have actually collected a magnet. Levels are saved in the campaign
+save, survive reload, stage changes, world changes and replays, and carry
+into endless.
+
 ## Save data
 
 Two independent keys, so campaign progress and the endless high score never

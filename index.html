@@ -115,6 +115,22 @@
   .previewWrap { position: relative; margin: -14px -16px 8px; }
   .previewWrap canvas { width: 100%; height: 62px; display: block; }
   .card.locked .previewWrap canvas { filter: grayscale(.7) brightness(.5); }
+  .upCard {
+    background: rgba(12,16,10,.9); border: 2px solid #34402a;
+    padding: 16px 14px; text-align: center; cursor: pointer;
+    display: flex; flex-direction: column; gap: 7px; align-items: center;
+    min-height: 150px; justify-content: center;
+    transition: border-color .15s, transform .1s, background .15s, opacity .15s;
+  }
+  .upCard:not(.taken):hover, .upCard:not(.taken):active {
+    border-color: var(--toxic); background: rgba(24,34,18,.95); transform: translateY(-3px);
+  }
+  .upCard .ic { font-size: 30px; line-height: 1; }
+  .upCard .nm { font-size: 15px; letter-spacing: 2px; color: var(--toxic); }
+  .upCard .ds { font-size: 12px; color: #cfd6c9; letter-spacing: 1px; }
+  .upCard .lv { font-size: 11px; color: #8a9678; letter-spacing: 2px; }
+  .upCard.picked { border-color: #ffd76a; background: rgba(60,50,10,.9); }
+  .upCard.taken { opacity: .35; cursor: default; transform: none; }
   .stack { display: flex; flex-direction: column; gap: 9px; width: 100%; }
 
   .results { display: grid; grid-template-columns: 1fr auto; gap: 5px 18px; font-size: 13px;
@@ -143,6 +159,10 @@
     .bigStars { font-size: 30px; margin: 4px 0 10px; }
     .results { font-size: 12px; margin-bottom: 12px; }
     .menuBtns button { min-width: 200px; }
+    .upCard { min-height: 110px; padding: 10px 8px; gap: 4px; }
+    .upCard .ic { font-size: 22px; }
+    .upCard .nm { font-size: 13px; }
+    .upCard .ds { font-size: 11px; }
   }
 </style>
 </head>
@@ -207,6 +227,15 @@
     <div class="sub" id="stagesSub">THE OUTBREAK</div>
     <div class="stack" id="stageList"></div>
     <div class="backRow"><button class="ghost" id="stagesBack">WORLD SELECT</button></div>
+  </div>
+</div>
+
+<div id="upgrade" class="overlay hidden">
+  <div class="panel wide">
+    <h2>CHOOSE YOUR UPGRADE</h2>
+    <div class="sub" id="upSub">Select 1 upgrade before entering the stage</div>
+    <div class="grid" id="upCards"></div>
+    <div class="unlockNote" id="upNote"></div>
   </div>
 </div>
 
@@ -622,6 +651,9 @@ const WORLDS = [
    Namespaced away from "deadzone_best" so the endless high score is
    untouched by anything the campaign does. */
 const SAVE_KEY = "deadzone_campaign_v1";
+/* Cap used while loading, before the upgrade table is defined. Kept in step
+   with UPGRADE_MAX; migrate() must not reference anything defined later. */
+const UPGRADE_MAX_SAVED = 5;
 
 /* TEST MODE -- every world and stage is playable regardless of progress.
    Set this to false to restore sequential unlocking; nothing else needs to
@@ -640,7 +672,7 @@ const Progress = {
       });
       worlds[w.id] = { unlocked: UNLOCK_ALL || w.id === 1, completed: false, introSeen: false, stages };
     }
-    return { version: 1, worlds, highestWave: 0, weapons: ["pistol"] };
+    return { version: 1, worlds, highestWave: 0, weapons: ["pistol"], upgrades: {}, seenMagnet: false };
   },
   load() {
     try {
@@ -689,6 +721,14 @@ const Progress = {
     // WEAPON_INDEX -- doing so threw inside load()'s try/catch and silently
     // reset the entire save. Unknown ids are inert: equipUnlocked walks
     // WEAPONS and simply never asks about them.
+    base.upgrades = {};
+    if (saved.upgrades && typeof saved.upgrades === "object") {
+      for (const k in saved.upgrades) {
+        const lvl = saved.upgrades[k] | 0;
+        if (lvl > 0) base.upgrades[k] = Math.min(lvl, UPGRADE_MAX_SAVED);
+      }
+    }
+    base.seenMagnet = !!saved.seenMagnet;
     base.weapons = ["pistol"];
     if (Array.isArray(saved.weapons)) {
       for (const id of saved.weapons) {
@@ -2098,7 +2138,8 @@ function activatePowerup(key) {
   const pu = POWERUPS[key];
   if (!pu) return;
   const already = powerupActive(key);
-  player.powerups[key] = game.time + pu.duration;
+  const dur = (key === "magnet" && player.magnetDur) ? player.magnetDur : pu.duration;
+  player.powerups[key] = game.time + dur;
   if (already) { if (pu.onRefill) pu.onRefill(); }
   else if (pu.onActivate) pu.onActivate();
   SFX.magnet();
@@ -2208,6 +2249,11 @@ function damageEnemy(z, dmg, kx, ky, weapon, hitX, hitY) {
       floats.push(new FloatText(z.x, z.y - z.r - 6, "HEAD", "#ffd76a", false));
     }
   }
+  // critical hit: independent of headshots, capped by upgrade level
+  if (player.critChance > 0 && Math.random() < player.critChance) {
+    out *= player.critMul;
+    floats.push(new FloatText(z.x + 8, z.y - z.r - 14, "CRIT", "#ff6bd0", false));
+  }
   if (weapon && weapon.burn) z.applyBurn(weapon.burn.dps, weapon.burn.dur);
   if (weapon && weapon.freeze) z.applyFreeze(weapon.freeze);
   z.hurt(out, kx, ky);
@@ -2307,6 +2353,181 @@ const FIRE_MODES = {
   }
 };
 
+
+/* ================= UPGRADES =================
+   A stage-start pick-one-of-three. Every entry declares what it needs to be
+   offerable: `weapon` (must be unlocked) or `feature` (must be active).
+   Filtering reads the live progression state, never a hard-coded stage list,
+   so a future weapon needs only its rows here. */
+const UPGRADE_MAX = 5;
+
+/* Feature gates. Each answers "can the player actually use this yet?" */
+const FEATURES = {
+  health:   () => true,
+  armor:    () => true,
+  speed:    () => true,
+  stamina:  () => true,
+  crit:     () => true,                       // implemented below, always live
+  pickups:  () => true,
+  magnet:   () => !!(Progress.data && Progress.data.seenMagnet)   // only once one has been collected
+};
+function featureAvailable(key) { const f = FEATURES[key]; return f ? !!f() : false; }
+
+/* The one place that decides which weapons may contribute upgrades. It reads
+   the real unlock state rather than the weapon table's existence. */
+function getAvailableWeaponsForUpgrade() {
+  const out = [];
+  for (let i = 0; i < WEAPONS.length; i++) {
+    const w = WEAPONS[i];
+    const unlocked = player.unlocked[i] || (i === 0) ||
+      (Progress.hasWeapon && Progress.hasWeapon(w.id));
+    if (unlocked) out.push(w.id);
+  }
+  return out;
+}
+
+const pct = n => "+" + Math.round(n * 100) + "%";
+const pctDown = n => "-" + Math.round(n * 100) + "%";
+
+/* Weapon rows are generated per weapon so adding a gun cannot forget any. */
+function weaponUpgrades() {
+  const rows = [];
+  const add = (wid, id, name, icon, cat, step, fmt, extra) => {
+    rows.push(Object.assign({ id: wid + ":" + id, weapon: wid, name, icon, cat,
+      step, fmt, max: UPGRADE_MAX }, extra || {}));
+  };
+  for (const w of WEAPONS) {
+    const N = w.name;
+    add(w.id, "dmg",    N + " DAMAGE",   "🔫", "damage",   0.10, l => pct(0.10 * l));
+    add(w.id, "reload", N + " RELOAD",   "🔄", "reload",   0.08, l => pctDown(0.08 * l) + " reload time");
+    if (w.mode !== "projectile") {
+      add(w.id, "rof",  N + " FIRE RATE", "⚡", "firerate", 0.07, l => pct(0.07 * l) + " fire rate");
+      add(w.id, "mag",  N + " MAGAZINE",  "📦", "magazine", 0.15, l => "+" + Math.ceil(w.mag * 0.15 * l) + " rounds");
+    }
+    if (w.spread > 0.01) add(w.id, "spread", N + " ACCURACY", "🎯", "accuracy", 0.12, l => pctDown(0.12 * l) + " spread");
+    if (w.reserveMax !== Infinity) add(w.id, "ammo", N + " AMMO CAP", "🎒", "capacity", 0.12, l => pct(0.12 * l) + " reserve");
+
+    // weapon-specific identities
+    if (w.id === "shotgun") {
+      add(w.id, "pellets", "SHOTGUN PELLETS", "💥", "special", 1, l => "+" + l + " pellets", { max: 3 });
+      add(w.id, "knock",   "SHOTGUN KNOCKBACK", "🌀", "special", 0.15, l => pct(0.15 * l) + " knockback");
+    }
+    if (w.id === "sniper")    add(w.id, "head", "SNIPER CRIT DAMAGE", "🎯", "special", 0.2, l => "+" + (0.2 * l).toFixed(1) + "x headshot");
+    if (w.projectile) {
+      add(w.id, "radius", N + " BLAST RADIUS", "💣", "special", 0.10, l => pct(0.10 * l) + " radius");
+      add(w.id, "pspeed", N + " SHELL SPEED",  "🚀", "special", 0.12, l => pct(0.12 * l) + " projectile speed");
+    }
+    if (w.burn)  add(w.id, "burn",  "BURN DURATION", "🔥", "special", 0.15, l => pct(0.15 * l) + " burn time");
+    if (w.chain) {
+      add(w.id, "chain",  "TESLA CHAIN COUNT", "⚡", "special", 1, l => "+" + l + " chain targets", { max: 3 });
+      add(w.id, "crange", "TESLA CHAIN RANGE", "📡", "special", 0.12, l => pct(0.12 * l) + " chain range");
+    }
+    if (w.freeze) add(w.id, "freeze", "FREEZE DURATION", "❄️", "special", 0.12, l => pct(0.12 * l) + " freeze time");
+  }
+  return rows;
+}
+
+const UPGRADES = weaponUpgrades().concat([
+  { id: "p:hp",      feature: "health",  name: "MAX HEALTH",     icon: "❤️", cat: "vitality", step: 0.10, max: UPGRADE_MAX, fmt: l => pct(0.10 * l) + " max health" },
+  { id: "p:armor",   feature: "armor",   name: "ARMOR",          icon: "🛡", cat: "vitality", step: 0.04, max: UPGRADE_MAX, fmt: l => pct(0.04 * l) + " damage reduction" },
+  { id: "p:speed",   feature: "speed",   name: "MOVEMENT SPEED", icon: "👟", cat: "mobility", step: 0.04, max: UPGRADE_MAX, fmt: l => pct(0.04 * l) + " move speed" },
+  { id: "p:stam",    feature: "stamina", name: "MAX STAMINA",    icon: "🫁", cat: "mobility", step: 0.10, max: UPGRADE_MAX, fmt: l => pct(0.10 * l) + " stamina" },
+  { id: "p:stamreg", feature: "stamina", name: "SPRINT RECOVERY","icon": "♻️", cat: "mobility", step: 0.12, max: UPGRADE_MAX, fmt: l => pct(0.12 * l) + " stamina regen" },
+  { id: "c:crit",    feature: "crit",    name: "CRITICAL CHANCE","icon": "✨", cat: "combat",  step: 0.04, max: UPGRADE_MAX, fmt: l => pct(0.04 * l) + " crit chance" },
+  { id: "c:critdmg", feature: "crit",    name: "CRITICAL DAMAGE","icon": "💢", cat: "combat",  step: 0.15, max: UPGRADE_MAX, fmt: l => "+" + (0.15 * l).toFixed(2) + "x crit damage" },
+  { id: "c:knock",   feature: "crit",    name: "KNOCKBACK",      icon: "🌀", cat: "combat",   step: 0.10, max: UPGRADE_MAX, fmt: l => pct(0.10 * l) + " knockback" },
+  { id: "k:ammo",    feature: "pickups", name: "AMMO PICKUPS",   icon: "🎒", cat: "pickup",   step: 0.15, max: UPGRADE_MAX, fmt: l => pct(0.15 * l) + " ammo from pickups" },
+  { id: "k:health",  feature: "pickups", name: "MEDKIT POTENCY", icon: "🩹", cat: "pickup",   step: 0.15, max: UPGRADE_MAX, fmt: l => pct(0.15 * l) + " healing" },
+  { id: "m:dur",     feature: "magnet",  name: "MAGNET DURATION","icon": "🧲", cat: "pickup", step: 0.15, max: UPGRADE_MAX, fmt: l => pct(0.15 * l) + " magnet time" },
+  { id: "m:range",   feature: "magnet",  name: "MAGNET RANGE",   icon: "🧲", cat: "pickup",   step: 0.12, max: UPGRADE_MAX, fmt: l => pct(0.12 * l) + " magnet range" }
+]);
+const UPGRADE_BY_ID = {};
+for (const u of UPGRADES) UPGRADE_BY_ID[u.id] = u;
+
+function upgradeLevel(id) { return (Progress.data.upgrades && Progress.data.upgrades[id]) || 0; }
+
+/* An upgrade is offerable only if its weapon is unlocked / its feature is
+   live, and it is not already maxed. This runs before any random pick. */
+function upgradeIsValid(u) {
+  if (upgradeLevel(u.id) >= u.max) return false;
+  if (u.weapon) return getAvailableWeaponsForUpgrade().includes(u.weapon);
+  if (u.feature) return featureAvailable(u.feature);
+  return true;
+}
+
+/* Build, shuffle, then take three -- preferring three different categories so
+   the offer never reads as the same upgrade three times. */
+function rollUpgradeChoices(n) {
+  n = n || 3;
+  const pool = UPGRADES.filter(upgradeIsValid);
+  for (let i = pool.length - 1; i > 0; i--) {      // Fisher-Yates
+    const j = Math.floor(Math.random() * (i + 1));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
+  const chosen = [], cats = new Set();
+  for (const u of pool) {
+    if (chosen.length >= n) break;
+    if (cats.has(u.cat)) continue;
+    chosen.push(u); cats.add(u.cat);
+  }
+  for (const u of pool) {                          // top up if categories ran out
+    if (chosen.length >= n) break;
+    if (!chosen.includes(u)) chosen.push(u);
+  }
+  return chosen;
+}
+
+/* Derives every modified stat from the saved levels. Called after any change
+   and after player.reset(), so a new stage never wipes permanent upgrades. */
+function applyUpgrades() {
+  const L = id => upgradeLevel(id);
+
+  player.wstats = WEAPONS.map(w => {
+    const o = Object.assign({}, w);
+    const l = id => L(w.id + ":" + id);
+    if (l("dmg"))    o.dmg = w.dmg * (1 + 0.10 * l("dmg"));
+    if (l("rof"))    o.rof = w.rof * (1 - 0.07 * l("rof"));
+    if (l("reload")) o.reload = w.reload * (1 - 0.08 * l("reload"));
+    if (l("mag"))    o.mag = w.mag + Math.ceil(w.mag * 0.15 * l("mag"));
+    if (l("spread")) o.spread = w.spread * (1 - 0.12 * l("spread"));
+    if (l("ammo") && w.reserveMax !== Infinity) o.reserveMax = Math.round(w.reserveMax * (1 + 0.12 * l("ammo")));
+    if (l("pellets")) o.pellets = w.pellets + l("pellets");
+    if (l("knock"))  o.knock = w.knock * (1 + 0.15 * l("knock"));
+    if (l("head"))   o.headMul = (w.headMul || 1) + 0.2 * l("head");
+    o.knock *= 1 + 0.10 * L("c:knock");
+    if (w.projectile) {
+      o.projectile = Object.assign({}, w.projectile);
+      if (l("radius")) o.projectile.radius = Math.round(w.projectile.radius * (1 + 0.10 * l("radius")));
+      if (l("pspeed")) o.speed = w.speed * (1 + 0.12 * l("pspeed"));
+    }
+    if (w.burn && l("burn")) o.burn = { dps: w.burn.dps, dur: Math.round(w.burn.dur * (1 + 0.15 * l("burn"))) };
+    if (w.chain) {
+      if (l("chain"))  o.chain = w.chain + l("chain");
+      if (l("crange")) o.chainRange = Math.round(w.chainRange * (1 + 0.12 * l("crange")));
+    }
+    if (w.freeze && l("freeze")) o.freeze = Object.assign({}, w.freeze, {
+      dur: Math.round(w.freeze.dur * (1 + 0.12 * l("freeze"))),
+      bossDur: Math.round(w.freeze.bossDur * (1 + 0.12 * l("freeze")))
+    });
+    return o;
+  });
+
+  const hpFrac = player.maxHp ? player.hp / player.maxHp : 1;
+  player.maxHp = Math.round(100 * (1 + 0.10 * L("p:hp")));
+  player.hp = Math.min(player.maxHp, Math.round(player.maxHp * hpFrac));
+  player.armor = Math.min(0.20, 0.04 * L("p:armor"));       // hard cap
+  player.speed = 3.05 * (1 + 0.04 * L("p:speed"));
+  player.staminaMax = 100 * (1 + 0.10 * L("p:stam"));
+  player.staminaRegen = 0.30 * (1 + 0.12 * L("p:stamreg"));
+  player.critChance = Math.min(0.20, 0.04 * L("c:crit"));   // hard cap
+  player.critMul = 1.5 + 0.15 * L("c:critdmg");
+  player.ammoBoost = 1 + 0.15 * L("k:ammo");
+  player.healBoost = 1 + 0.15 * L("k:health");
+  player.magnetDur = MAGNET_CONFIG.duration * (1 + 0.15 * L("m:dur"));
+  player.magnetRadius = MAGNET_CONFIG.radius * (1 + 0.12 * L("m:range"));
+}
+function wstat(i) { return (player.wstats && player.wstats[i]) || WEAPONS[i]; }
+
 /* ---------------- entities ---------------- */
 class Player {
   constructor() { this.reset(); }
@@ -2331,10 +2552,16 @@ class Player {
     this.shieldFlash = 0;      // brief flare when it absorbs a hit
     this.blastReady = 0;       // cooldown gate so one click is one blast
     this.powerups = {};        // key -> expiry timestamp (see POWERUPS)
+    // upgrade-derived stats; applyUpgrades() fills these from the save
+    this.wstats = null;
+    this.armor = 0; this.staminaMax = 100; this.staminaRegen = 0.30;
+    this.critChance = 0; this.critMul = 1.5;
+    this.ammoBoost = 1; this.healBoost = 1;
+    this.magnetDur = MAGNET_CONFIG.duration; this.magnetRadius = MAGNET_CONFIG.radius;
     this._puWas = {};          // edge detection for the expiry notice
   }
   get shielded() { return game.time < this.shieldUntil; }
-  get weapon() { return WEAPONS[this.wi]; }
+  get weapon() { return wstat(this.wi); }
   selectWeapon(i) {
     if (i === this.wi || !this.unlocked[i] || game.state !== "play") return;
     this.wi = i; this.reloading = false;
@@ -2439,7 +2666,7 @@ class Player {
     const wantSprint = (keys["shift"] || stickFull) && m > 0.1 && this.stamina > 1;
     this.sprinting = wantSprint;
     if (wantSprint) this.stamina = Math.max(0, this.stamina - 0.55 * dt);
-    else this.stamina = Math.min(100, this.stamina + 0.30 * dt);
+    else this.stamina = Math.min(this.staminaMax, this.stamina + this.staminaRegen * dt);
 
     const sp = this.speed * (this.sprinting ? 1.55 : 1) * dt;
     this.x = clamp(this.x + dx * sp, this.r, W - this.r);
@@ -2487,6 +2714,7 @@ class Player {
       }
       return;
     }
+    n = n * (1 - (this.armor || 0));      // armor upgrade
     this.hp -= n;
     this.invuln = 380;
     game.shake = Math.min(20, game.shake + 8);
@@ -3134,7 +3362,7 @@ class Pickup {
     // eligible immediately.
     const dx = player.x - this.x, dy = player.y - this.y;
     const d2 = dx * dx + dy * dy;
-    const R = MAGNET_CONFIG.radius;
+    const R = player.magnetRadius || MAGNET_CONFIG.radius;
     if (powerupActive("magnet") && d2 < R * R && isMagnetic(this)) {
       const d = Math.sqrt(d2) || 1;
       const pull = MAGNET_CONFIG.accel * (0.45 + 0.55 * (1 - d / R));
@@ -3159,6 +3387,9 @@ class Pickup {
     if (dist2(this.x, this.y, player.x, player.y) < 24 * 24) {
       this.dead = true;
       if (POWERUPS[this.kind]) {
+        if (this.kind === "magnet" && !Progress.data.seenMagnet) {
+          Progress.data.seenMagnet = true; Progress.save();
+        }
         activatePowerup(this.kind);
         return;                          // its own sound already played
       }
@@ -3172,20 +3403,22 @@ class Pickup {
           game.toast("+1 " + it.name, it.color);
         }
       } else if (this.kind === "health") {
-        player.hp = Math.min(player.maxHp, player.hp + 25);
-        game.toast("+25 HP", "#6ee36e");
+        const heal = Math.round(25 * (player.healBoost || 1));
+        player.hp = Math.min(player.maxHp, player.hp + heal);
+        game.toast("+" + heal + " HP", "#6ee36e");
       } else {
         // one pickup, two tiers: the common box tops up standard guns, the
         // rarer crate feeds the heavy weapons. The equipped gun gets priority.
         const heavyOnly = this.kind === "ammoHeavy";
         let given = false;
         const fill = (i, mul) => {
-          const w = WEAPONS[i];
+          const w = wstat(i);
           if (!player.unlocked[i] || !w.pickup || w.reserveMax === Infinity) return;
           if (heavyOnly && !w.heavy) return;
           if (!heavyOnly && w.heavy) return;
           if (player.reserve[i] >= w.reserveMax) return;
-          player.reserve[i] = Math.min(w.reserveMax, player.reserve[i] + Math.max(1, Math.round(w.pickup * mul)));
+          player.reserve[i] = Math.min(w.reserveMax,
+            player.reserve[i] + Math.max(1, Math.round(w.pickup * mul * (player.ammoBoost || 1))));
           given = true;
         };
         fill(player.wi, 1);                                  // what you are holding
@@ -3422,10 +3655,11 @@ const game = {
       const has = i === 0 || Progress.hasWeapon(w.id);
       if (!has) continue;
       if (!player.unlocked[i]) {
+        const ws = wstat(i);
         player.unlocked[i] = true;
-        player.ammo[i] = w.mag;
-        player.reserve[i] = w.reserveMax === Infinity ? Infinity
-          : Math.max(player.reserve[i] || 0, Math.round(w.reserveMax * 0.5));
+        player.ammo[i] = ws.mag;
+        player.reserve[i] = ws.reserveMax === Infinity ? Infinity
+          : Math.max(player.reserve[i] || 0, Math.round(ws.reserveMax * 0.5));
       }
     }
   },
@@ -3441,6 +3675,7 @@ const game = {
     this.reset();
     for (const k in seenEnemies) delete seenEnemies[k];
     this.newEnemy = null; this.newEnemyTime = 0;
+    applyUpgrades();          // reset() cleared the player; restore permanent upgrades
     this.plan = buildWavePlan(world, stageNo - 1);
     this.planIdx = 0;
     this.waveActive = false;
@@ -3481,7 +3716,7 @@ const game = {
     if (this.wave % 3 === 0) player.items.shield = Math.min(ITEMS.shield.max, player.items.shield + 1);
     if (this.wave % 4 === 0) player.items.blast = Math.min(ITEMS.blast.max, player.items.blast + 1);
     for (let i = 1; i < 3; i++) {
-      if (player.unlocked[i]) player.reserve[i] = Math.min(WEAPONS[i].reserveMax, player.reserve[i] + (i === 1 ? 10 : 50));
+      if (player.unlocked[i]) player.reserve[i] = Math.min(wstat(i).reserveMax, player.reserve[i] + (i === 1 ? 10 : 50));
     }
   },
 
@@ -3582,7 +3817,7 @@ const game = {
 
 /* ================= SCREENS =================
    One place decides which overlay is up, so no two can stack. */
-const SCREENS = ["menu", "how", "settings", "worlds", "worldintro", "stages", "stagedone", "worlddone", "gameover", "paused"];
+const SCREENS = ["menu", "how", "settings", "worlds", "worldintro", "stages", "upgrade", "stagedone", "worlddone", "gameover", "paused"];
 let overlayShown = true;   // cheap mirror of "is any overlay up"
 function showScreen(id) {
   for (const sc of SCREENS) {
@@ -3759,11 +3994,71 @@ function showStages(worldId) {
   checkOrientation();
 }
 
+/* Stage start is two steps now: prepare everything, offer the upgrade while
+   the game is still frozen, and only then hand control over. Wave 1 cannot
+   begin until the choice is made because update() only runs in "play". */
 function launchStage(worldId, stageNo) {
   audio();
-  game.startStage(worldId, stageNo);
-  game.state = "play";
-  hideAllScreens();
+  game.startStage(worldId, stageNo);        // sets up the stage, does not run it
+  showUpgradeChoice(() => {
+    game.state = "play";
+    hideAllScreens();
+    checkOrientation();
+  });
+}
+
+
+/* ---- stage-start upgrade pick ----
+   Shown while the stage is prepared but NOT running: game.state is
+   "upgrade", so update() never ticks and wave 1 cannot begin behind it. */
+let upgradeLocked = false;
+
+function showUpgradeChoice(onDone) {
+  const choices = rollUpgradeChoices(3);
+  if (!choices.length) { onDone(); return; }        // genuinely nothing valid: never fake one
+
+  upgradeLocked = false;
+  game.state = "upgrade";
+  const wrap = $("upCards");
+  wrap.innerHTML = "";
+  $("upSub").textContent = "Select 1 upgrade before entering the stage";
+  $("upNote").textContent = "";
+
+  choices.forEach(u => {
+    const lvl = upgradeLevel(u.id);
+    const card = document.createElement("div");
+    card.className = "upCard";
+    card.innerHTML =
+      '<div class="ic"></div><div class="nm"></div><div class="ds"></div><div class="lv"></div>';
+    card.querySelector(".ic").textContent = u.icon;
+    card.querySelector(".nm").textContent = u.name;
+    card.querySelector(".ds").textContent = u.fmt(lvl + 1);
+    card.querySelector(".lv").textContent = "LEVEL " + lvl + "  \u2192  " + (lvl + 1) + " / " + u.max;
+
+    const choose = (ev) => {
+      if (ev) { ev.preventDefault(); ev.stopPropagation(); }
+      // first valid selection wins; every later click/tap is ignored
+      if (upgradeLocked) return;
+      upgradeLocked = true;
+      audio();
+      Progress.data.upgrades[u.id] = upgradeLevel(u.id) + 1;
+      Progress.save();
+      applyUpgrades();
+      SFX.pickup();
+      for (const c of wrap.children) c.classList.add("taken");
+      card.classList.remove("taken");
+      card.classList.add("picked");
+      $("upSub").textContent = "UPGRADE SELECTED";
+      $("upNote").textContent = u.name + "  \u00b7  LEVEL " + Progress.data.upgrades[u.id];
+      setTimeout(onDone, 620);                       // brief confirmation, then play
+    };
+    // one handler, on the whole card; pointerdown covers mouse and touch
+    // without the pair firing twice
+    card.addEventListener("pointerdown", choose);
+    wrap.appendChild(card);
+  });
+
+  hideAllScreens(); showScreen("upgrade");
   checkOrientation();
 }
 
@@ -3858,6 +4153,7 @@ function startEndless() {
   invalidatePropLayer(); seedAtmos();
   game.reset();
   game.equipUnlocked();          // endless uses whatever campaign has earned
+  applyUpgrades();               // and whatever upgrades it has earned
   game.state = "play";
   hideAllScreens();
   checkOrientation();
@@ -4207,7 +4503,7 @@ function drawHUD(g) {
   bar(g, 16, 16, 220, 18, player.hp / player.maxHp, player.hp > 35 ? "#3fa34d" : "#c0392b", "rgba(0,0,0,.6)",
       "HP " + Math.ceil(player.hp));
   // stamina
-  bar(g, 16, 38, 140, 7, player.stamina / 100, "#4aa3c7", "rgba(0,0,0,.5)");
+  bar(g, 16, 38, 140, 7, player.stamina / player.staminaMax, "#4aa3c7", "rgba(0,0,0,.5)");
 
   // weapon + ammo
   const w = player.weapon;
@@ -4354,7 +4650,8 @@ function drawHUD(g) {
     for (const key in POWERUPS) {
       if (!powerupActive(key)) continue;
       const pu = POWERUPS[key], left = powerupLeft(key);
-      const frac = clamp(left / pu.duration, 0, 1);
+      const full = (key === "magnet" && player.magnetDur) ? player.magnetDur : pu.duration;
+      const frac = clamp(left / full, 0, 1);
       const bx = 16, by = H - 132 - row * 46, bw = 172, bh = 30;
       g.fillStyle = "rgba(0,0,0,.62)"; g.fillRect(bx, by, bw, bh);
       g.strokeStyle = pu.color; g.lineWidth = 2; g.strokeRect(bx + .5, by + .5, bw - 1, bh - 1);
@@ -4589,7 +4886,7 @@ function render() {
   // game.time, so it allocates nothing per frame.
   if (powerupActive("magnet")) {
     const left = powerupLeft("magnet");
-    const R = MAGNET_CONFIG.radius;
+    const R = player.magnetRadius || MAGNET_CONFIG.radius;
     const pulse = (game.time % 1400) / 1400;               // 0..1 sweep
     const expiring = left < 2000 && Math.floor(left / 160) % 2 === 0;
     ctx.save();
@@ -4799,6 +5096,7 @@ function frame(now) {
 
 resize();
 game.reset();
+applyUpgrades();
 goMenu();
 requestAnimationFrame(frame);
 </script>
