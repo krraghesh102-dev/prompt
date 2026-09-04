@@ -769,7 +769,8 @@ const Progress = {
     for (const w of WORLDS) {
       const stages = {};
       w.stages.forEach((st, i) => {
-        stages[i + 1] = { unlocked: UNLOCK_ALL || (w.id === 1 && i === 0), completed: false, stars: 0, best: 0 };
+        stages[i + 1] = { unlocked: UNLOCK_ALL || (w.id === 1 && i === 0), completed: false,
+                          stars: 0, best: 0, upgradeTaken: false };
       });
       worlds[w.id] = { unlocked: UNLOCK_ALL || w.id === 1, completed: false, introSeen: false, stages };
     }
@@ -815,6 +816,9 @@ const Progress = {
         bs.completed = !!ss.completed;
         bs.stars = Math.max(0, Math.min(3, ss.stars | 0));
         bs.best = Math.max(0, ss.best | 0);
+        // saves written before stage-start upgrades simply have no flag; a
+        // stage already cleared counts as having had its pick
+        bs.upgradeTaken = ss.upgradeTaken !== undefined ? !!ss.upgradeTaken : !!ss.completed;
       }
     }
     base.highestWave = Math.max(0, saved.highestWave | 0);
@@ -2294,7 +2298,7 @@ function abilityLockFrac(kind) {
     const g = grenades[0];
     return g ? clamp(g.fuse / ITEMS.grenade.fuse, 0, 1) : 0;
   }
-  if (kind === "shield") return clamp((player.shieldUntil - game.time) / ITEMS.shield.duration, 0, 1);
+  if (kind === "shield") return clamp((player.shieldUntil - game.time) / gstat("shield").duration, 0, 1);
   if (kind === "blast")  return clamp((player.blastReady - game.time) / ITEMS.blast.cooldown, 0, 1);
   if (kind === "airstrike") {
     if (airStrike.phase === "idle") return 0;
@@ -2581,9 +2585,11 @@ function noteKill() {
   if (tier > lastComboTier && game.combo >= 5) {
     lastComboTier = tier;
     const mult = 1 + Math.min(1.5, tier * 0.25);
-    game.toast(game.combo + "x COMBO  " + mult.toFixed(2) + "x", tier >= 4 ? "#ff6bd0" : "#ffd76a");
-    blip("square", 520 + tier * 80, 0.10, 0.05, 900);
-    addShake(1.2);
+    // deliberately a small float, not a banner: the combo is a SCORE bonus,
+    // and the campaign's power progression is the upgrades, not the streak
+    floats.push(new FloatText(player.x, player.y - 30,
+      game.combo + "x  " + mult.toFixed(2) + "x SCORE", tier >= 4 ? "#ff6bd0" : "#ffd76a", false));
+    blip("square", 520 + tier * 80, 0.08, 0.035, 900);
   }
 }
 
@@ -2641,29 +2647,44 @@ function damageEnemy(z, dmg, kx, ky, weapon, hitX, hitY) {
 const FIRE_MODES = {
   /* pistol, shotgun, rifle, sniper, freeze: bullets, optionally piercing */
   hitscan(p, w, base) {
-    game.shotsFired += w.pellets;
+    // MULTI SHOT adds whole extra rounds, fanned either side of the aim.
+    // Each is an ordinary independent Bullet, so it carries full damage and
+    // goes through the same single collision path -- one bullet, one hit,
+    // one death. Nothing here can score or kill twice.
+    const shots = w.multi || 1;
+    game.shotsFired += w.pellets * shots;
     const muzzle = p.r + 10;
-    for (let i = 0; i < w.pellets; i++) {
-      const a = base + rand(-w.spread, w.spread);
-      const b = new Bullet(
-        p.x + Math.cos(base) * muzzle, p.y + Math.sin(base) * muzzle,
-        Math.cos(a) * w.speed, Math.sin(a) * w.speed,
-        w.dmg, w.knock, w.color, w.tracer);
-      b.weapon = w;
-      b.pierce = w.pierce || 0;
-      if (w.rangeMul) b.life *= w.rangeMul;
-      bullets.push(b);
+    for (let sN = 0; sN < shots; sN++) {
+      // 1 round -> dead centre; 2 -> +-half a fan; 3 -> centre and both sides
+      const off = shots === 1 ? 0 : (sN - (shots - 1) / 2) * MULTISHOT_FAN * 2;
+      const aim = base + off;
+      for (let i = 0; i < w.pellets; i++) {
+        const a = aim + rand(-w.spread, w.spread);
+        const b = new Bullet(
+          p.x + Math.cos(aim) * muzzle, p.y + Math.sin(aim) * muzzle,
+          Math.cos(a) * w.speed, Math.sin(a) * w.speed,
+          w.dmg, w.knock, w.color, w.tracer);
+        b.weapon = w;
+        b.pierce = w.pierce || 0;
+        if (w.rangeMul) b.life *= w.rangeMul;
+        bullets.push(b);
+      }
     }
   },
 
   /* grenade launcher and rocket: a real travelling object */
   projectile(p, w, base) {
-    game.shotsFired += 1;
-    const a = base + rand(-w.spread, w.spread);
+    const shots = w.multi || 1;
+    game.shotsFired += shots;
     const muzzle = p.r + 14;
-    projectiles.push(new Projectile(
-      p.x + Math.cos(base) * muzzle, p.y + Math.sin(base) * muzzle,
-      Math.cos(a) * w.speed, Math.sin(a) * w.speed, w.projectile, w));
+    for (let sN = 0; sN < shots; sN++) {
+      const off = shots === 1 ? 0 : (sN - (shots - 1) / 2) * MULTISHOT_FAN * 2.4;
+      const a = base + off + rand(-w.spread, w.spread);
+      // each shell is its own Projectile with its own one-shot boom() guard
+      projectiles.push(new Projectile(
+        p.x + Math.cos(base + off) * muzzle, p.y + Math.sin(base + off) * muzzle,
+        Math.cos(a) * w.speed, Math.sin(a) * w.speed, w.projectile, w));
+    }
   },
 
   /* flamethrower: a cone of short-lived puffs that damage what they touch */
@@ -2740,6 +2761,18 @@ const FIRE_MODES = {
    so a future weapon needs only its rows here. */
 const UPGRADE_MAX = 5;
 
+/* Which weapons may take MULTI SHOT, and how far it goes. The shotgun is
+   absent on purpose: it already throws a pellet spread, and stacking a
+   multiplier on top of that is the duplicate-pellet trap. Stream and chain
+   weapons have no single projectile to duplicate. */
+const MULTISHOT_MAX = 2;                     // +2 extra rounds at most
+const MULTISHOT_OK = {
+  pistol: true, rifle: true, sniper: true, freeze: true, glauncher: true
+};
+/* How far apart the extra rounds fan out, in radians. Small enough that the
+   burst still reads as one shot at range. */
+const MULTISHOT_FAN = 0.085;
+
 /* Rarity drives both the size of the improvement and how often an upgrade is
    offered. Boss stages shift the weights upward without changing the rules. */
 const RARITY = {
@@ -2766,6 +2799,7 @@ const FEATURES = {
   stamina:  () => true,
   crit:     () => true,                       // implemented below, always live
   pickups:  () => true,
+  gear:     () => true,                       // grenade / blast / layer are carried from stage 1
   magnet:   () => !!(Progress.data && Progress.data.seenMagnet),  // only once one has been collected
   airstrike:() => !!(Progress.data && (Progress.data.abilities || []).includes("airstrike"))
 };
@@ -2804,6 +2838,23 @@ function weaponUpgrades() {
     }
     if (w.spread > 0.01) add(w.id, "spread", N + " ACCURACY", "🎯", "accuracy", 0.12, l => pctDown(0.12 * l) + " spread");
     if (w.reserveMax !== Infinity) add(w.id, "ammo", N + " AMMO CAP", "🎒", "capacity", 0.12, l => pct(0.12 * l) + " reserve");
+
+    /* MULTI SHOT -- one trigger pull, more rounds in the air. Deliberately
+       skipped for the shotgun, which already fires a pellet spread, and for
+       the stream/chain weapons that have no discrete projectile. */
+    if (MULTISHOT_OK[w.id]) {
+      add(w.id, "multi", N + " MULTI SHOT", "🔱", "multishot", 1,
+          l => (1 + l) + " rounds per shot", { max: MULTISHOT_MAX, rarity: "epic" });
+    }
+    // every weapon can be shoved harder, not just the shotgun
+    if (w.id !== "shotgun" && w.knock > 0) {
+      add(w.id, "knock", N + " KNOCKBACK", "🌀", "knockback", 0.15, l => pct(0.15 * l) + " knockback");
+    }
+    // hitscan rounds fly faster; the collision sampler already covers the
+    // extra distance per frame, so nothing can tunnel
+    if (w.mode === "hitscan") {
+      add(w.id, "bspeed", N + " ROUND SPEED", "🚀", "velocity", 0.12, l => pct(0.12 * l) + " bullet speed");
+    }
 
     // weapon-specific identities
     if (w.id === "shotgun") {
@@ -2857,6 +2908,16 @@ const UPGRADES = weaponUpgrades().concat([
   { id: "u:dmg",    weapon: "*", name: "WEAPON MASTERY",  icon: "⭐", cat: "universal", step: 0.05, max: UPGRADE_MAX, rarity: "epic", fmt: l => pct(0.05 * l) + " damage, all weapons" },
   { id: "u:rof",    weapon: "*", name: "COMBAT TRAINING", icon: "🎖", cat: "universal", step: 0.05, max: UPGRADE_MAX, rarity: "epic", fmt: l => pct(0.05 * l) + " fire rate, all weapons" },
   { id: "u:reload", weapon: "*", name: "FAST HANDS",      icon: "🤲", cat: "universal", step: 0.06, max: UPGRADE_MAX, rarity: "rare", fmt: l => pctDown(0.06 * l) + " reload, all weapons" },
+  { id: "u:spread", weapon: "*", name: "STEADY AIM",      icon: "🎯", cat: "universal", step: 0.06, max: UPGRADE_MAX, rarity: "rare", fmt: l => pctDown(0.06 * l) + " spread, all weapons" },
+
+  /* Ability rows. Grenade, blast and the security layer are carried from the
+     first stage, so they are always valid; air strike is gated on its own
+     unlock like every other locked feature. */
+  { id: "g:dmg",    feature: "gear", name: "GRENADE DAMAGE",   icon: "💣", cat: "grenade", step: 0.12, max: UPGRADE_MAX, rarity: "rare", fmt: l => pct(0.12 * l) + " grenade damage" },
+  { id: "g:radius", feature: "gear", name: "GRENADE RADIUS",   icon: "💥", cat: "grenade", step: 0.10, max: UPGRADE_MAX, fmt: l => pct(0.10 * l) + " grenade radius" },
+  { id: "b:dmg",    feature: "gear", name: "BLAST DAMAGE",     icon: "⭕", cat: "blast",   step: 0.12, max: UPGRADE_MAX, rarity: "rare", fmt: l => pct(0.12 * l) + " blast damage" },
+  { id: "b:radius", feature: "gear", name: "BLAST RADIUS",     icon: "⭕", cat: "blast",   step: 0.10, max: UPGRADE_MAX, fmt: l => pct(0.10 * l) + " blast radius" },
+  { id: "h:dur",    feature: "gear", name: "LAYER DURATION",   icon: "🛡", cat: "shield",  step: 0.12, max: UPGRADE_MAX, rarity: "rare", fmt: l => pct(0.12 * l) + " security layer time" },
 
   /* Behaviour changers: rare by design, one level each. */
   { id: "s:piercing",   feature: "crit", name: SPECIALS.piercing.name,   icon: SPECIALS.piercing.icon,   cat: "behaviour", step: 1, max: 2, rarity: "legendary", fmt: l => "bullets pierce +" + l + " enemy" },
@@ -2892,6 +2953,18 @@ function upgradeIsValid(u) {
   return true;
 }
 
+/* Category weighting (spec 25). Rarity still decides the tier; this decides
+   which row inside the tier, so the offer leans on making the player's
+   shooting stronger while survival and utility stay in the mix. */
+const CATEGORY_PRIORITY = {
+  damage: 10, firerate: 10, multishot: 10, accuracy: 9, range: 9, reload: 8,
+  magazine: 7, universal: 8,
+  special: 6, behaviour: 6, velocity: 6, knockback: 6, combat: 6,
+  grenade: 5, blast: 5, shield: 4, airstrike: 6,
+  capacity: 3, vitality: 3, mobility: 3, pickup: 2
+};
+function categoryWeight(u) { return CATEGORY_PRIORITY[u.cat] !== undefined ? CATEGORY_PRIORITY[u.cat] : 5; }
+
 /* Build, shuffle, then take three -- preferring three different categories so
    the offer never reads as the same upgrade three times. */
 /* Weighted by rarity, then de-duplicated by category so the three cards are a
@@ -2912,13 +2985,20 @@ function rollUpgradeChoices(n, boss) {
     const tiers = Object.keys(byTier);
     let total = 0;
     for (const t of tiers) total += boss ? RARITY[t].bossWeight : RARITY[t].weight;
+    // inside a tier, pick by category priority rather than uniformly
+    const pickWeighted = (group) => {
+      let sum = 0;
+      for (const u of group) sum += categoryWeight(u);
+      let r = Math.random() * sum;
+      for (const u of group) { r -= categoryWeight(u); if (r <= 0) return u; }
+      return group[group.length - 1];
+    };
     let roll = Math.random() * total;
     for (const t of tiers) {
       roll -= boss ? RARITY[t].bossWeight : RARITY[t].weight;
-      if (roll <= 0) { const g = byTier[t]; return g[Math.floor(Math.random() * g.length)]; }
+      if (roll <= 0) return pickWeighted(byTier[t]);
     }
-    const g = byTier[tiers[tiers.length - 1]];
-    return g[Math.floor(Math.random() * g.length)];
+    return pickWeighted(byTier[tiers[tiers.length - 1]]);
   };
   while (chosen.length < n) {
     const u = takeOne(true) || takeOne(false);     // relax the category rule if needed
@@ -2933,7 +3013,7 @@ function rollUpgradeChoices(n, boss) {
 function applyUpgrades() {
   const L = id => upgradeLevel(id);
 
-  const uni = { dmg: L("u:dmg"), rof: L("u:rof"), reload: L("u:reload") };
+  const uni = { dmg: L("u:dmg"), rof: L("u:rof"), reload: L("u:reload"), spread: L("u:spread") };
   player.wstats = WEAPONS.map(w => {
     const o = Object.assign({}, w);
     const l = id => L(w.id + ":" + id);
@@ -2942,6 +3022,9 @@ function applyUpgrades() {
     if (l("reload")) o.reload = w.reload * (1 - 0.08 * l("reload"));
     if (l("mag"))    o.mag = w.mag + Math.ceil(w.mag * 0.15 * l("mag"));
     if (l("spread")) o.spread = w.spread * (1 - 0.12 * l("spread"));
+    // extra rounds per trigger pull, fanned so the burst still reads as one shot
+    if (l("multi")) o.multi = 1 + l("multi");
+    if (l("bspeed")) o.speed = w.speed * (1 + 0.12 * l("bspeed"));
     if (l("ammo") && w.reserveMax !== Infinity) o.reserveMax = Math.round(w.reserveMax * (1 + 0.12 * l("ammo")));
     if (l("pellets")) o.pellets = w.pellets + l("pellets");
     if (l("knock"))  o.knock = w.knock * (1 + 0.15 * l("knock"));
@@ -2954,12 +3037,13 @@ function applyUpgrades() {
     if (uni.dmg)    o.dmg *= 1 + 0.05 * uni.dmg;
     if (uni.rof)    o.rof *= 1 - 0.05 * uni.rof;
     if (uni.reload) o.reload *= 1 - 0.06 * uni.reload;
+    if (uni.spread) o.spread *= 1 - 0.06 * uni.spread;
     o.knock *= 1 + 0.10 * L("c:knock");
     o.pierce = (w.pierce || 0) + L("s:piercing");  // piercing rounds
     if (w.projectile) {
       o.projectile = Object.assign({}, w.projectile);
       if (l("radius")) o.projectile.radius = Math.round(w.projectile.radius * (1 + 0.10 * l("radius")));
-      if (l("pspeed")) o.speed = w.speed * (1 + 0.12 * l("pspeed"));
+      if (l("pspeed")) o.speed = w.speed * (1 + 0.12 * l("pspeed"));   // projectile weapons use their own row
       // explosive damage lives in projectile.blast, not dmg, so the damage
       // rows have to reach it or they would silently do nothing
       let blastMul = 1;
@@ -2994,6 +3078,14 @@ function applyUpgrades() {
   player.magnetRadius = MAGNET_CONFIG.radius * (1 + 0.12 * L("m:range"));
   player.lifesteal = L("s:vampiric");                    // HP per kill
   player.igniteChance = 0.12 * L("s:incendiary");
+  // gear scales from the ITEMS table, never from a second copy of the numbers
+  player.gearStats = {
+    grenade: { dmg: ITEMS.grenade.dmg * (1 + 0.12 * L("g:dmg")),
+               radius: ITEMS.grenade.radius * (1 + 0.10 * L("g:radius")) },
+    blast:   { dmg: ITEMS.blast.dmg * (1 + 0.12 * L("b:dmg")),
+               radius: ITEMS.blast.radius * (1 + 0.10 * L("b:radius")) },
+    shield:  { duration: Math.round(ITEMS.shield.duration * (1 + 0.12 * L("h:dur"))) }
+  };
   player.airDamage  = AIR_STRIKE_CONFIG.damage * (1 + 0.12 * L("a:dmg"));
   player.airRadius  = AIR_STRIKE_CONFIG.explosionRadius * (1 + 0.10 * L("a:radius"));
   player.airStrikes = AIR_STRIKE_CONFIG.strikes + L("a:count");
@@ -3001,6 +3093,9 @@ function applyUpgrades() {
   player.airSpread  = 1 + 0.08 * L("a:count");
 }
 function wstat(i) { return (player.wstats && player.wstats[i]) || WEAPONS[i]; }
+/* Upgraded gear numbers, falling back to the base table before applyUpgrades
+   has run. One accessor, so no site reads a stale copy. */
+function gstat(kind) { return (player.gearStats && player.gearStats[kind]) || ITEMS[kind]; }
 
 /* ---------------- entities ---------------- */
 class Player {
@@ -3137,7 +3232,7 @@ class Player {
       this.items.shield--;
       // one activation is exactly one full duration; the old extend-on-
       // re-arm path is unreachable now that the ability locks while up
-      this.shieldUntil = game.time + s.duration;
+      this.shieldUntil = game.time + gstat("shield").duration;
       game.toast("SECURITY LAYER UP", s.color);
       SFX.shieldOn();
 
@@ -3145,7 +3240,8 @@ class Player {
       const b = ITEMS.blast;
       this.items.blast--;
       this.blastReady = game.time + b.cooldown;
-      explode(this.x, this.y, b.radius, b.dmg, b.knock, "#ff8de0", true);
+      const bs = gstat("blast");
+      explode(this.x, this.y, bs.radius, bs.dmg, b.knock, "#ff8de0", true);
       game.toast("POWER BLAST", b.color);
       SFX.blast();
 
@@ -3822,7 +3918,8 @@ class Grenade {
     if (this.fuse <= 0) {
       this.dead = true;
       const g = ITEMS.grenade;
-      explode(this.x, this.y, g.radius, g.dmg, g.knock, "#ffb648", false);
+      const gs = gstat("grenade");
+      explode(this.x, this.y, gs.radius, gs.dmg, g.knock, "#ffb648", false);
       SFX.boom();
     }
   }
@@ -4294,6 +4391,7 @@ const game = {
   bossPending: null, bossWarnTime: 0, introWorld: null,
   newEnemy: null, newEnemyTime: 0,
   newWeapon: null, newWeaponTime: 0,
+  lastUpgrade: null, lastUpgradeTime: 0,   // brief "what I just took" reminder
   time: 0,
   score: 0, kills: 0,
   shotsFired: 0, shotsHit: 0, headshots: 0, maxCombo: 0,
@@ -4771,15 +4869,29 @@ function showStages(worldId) {
   checkOrientation();
 }
 
-/* Stage start is two steps now: prepare everything, offer the upgrade while
-   the game is still frozen, and only then hand control over. Wave 1 cannot
-   begin until the choice is made because update() only runs in "play". */
+/* Every stage opens with the upgrade choice. startStage() has already built
+   the stage but game.state is "upgrade" until a card is picked, and update()
+   only runs in "play" -- so wave 1 cannot begin behind the popup.
+
+   The grant is recorded on the stage's save entry, so quitting and
+   re-entering the same stage does not hand out a second upgrade. A stage
+   never played before always offers one. */
 function launchStage(worldId, stageNo) {
   audio();
   game.startStage(worldId, stageNo);
-  game.state = "play";
-  hideAllScreens();
-  checkOrientation();
+  const st = Progress.stage(worldId, stageNo);
+  const stage = WORLDS.find(w => w.id === worldId).stages[stageNo - 1];
+  const begin = () => {
+    game.state = "play";
+    hideAllScreens();
+    checkOrientation();
+  };
+  if (st.upgradeTaken) { begin(); return; }
+  showUpgradeChoice(() => {
+    st.upgradeTaken = true;
+    Progress.save();
+    begin();
+  }, { boss: !!stage.boss });
 }
 
 
@@ -4797,8 +4909,9 @@ function showUpgradeChoice(onDone, opts) {
   game.state = "upgrade";
   const wrap = $("upCards");
   wrap.innerHTML = "";
-  $("upTitle").textContent = opts.boss ? "BOSS REWARD" : "UPGRADE AVAILABLE";
-  $("upSub").textContent = "Choose 1 upgrade";
+  $("upTitle").textContent = opts.boss ? "BOSS STAGE  \u00b7  CHOOSE YOUR UPGRADE"
+                                      : "CHOOSE YOUR UPGRADE";
+  $("upSub").textContent = "Pick 1 of 3  \u00b7  your weapons keep it for the rest of the campaign";
   $("upNote").textContent = "";
 
   choices.forEach(u => {
@@ -4828,8 +4941,12 @@ function showUpgradeChoice(onDone, opts) {
       for (const c of wrap.children) c.classList.add("taken");
       card.classList.remove("taken");
       card.classList.add("picked");
-      $("upSub").textContent = "UPGRADE SELECTED";
-      $("upNote").textContent = u.name + "  \u00b7  " + u.fmt(upgradeLevel(u.id));
+      const lv = upgradeLevel(u.id);
+      $("upSub").textContent = "UPGRADE ACQUIRED";
+      $("upNote").textContent = u.name + "  LV." + lv + "  \u00b7  " + u.fmt(lv);
+      // a compact reminder on the HUD once the stage starts
+      game.lastUpgrade = u.name + "  LV." + lv;
+      game.lastUpgradeTime = 4200;
       setTimeout(onDone, 700);                      // short confirmation, then continue
     };
     card.addEventListener("pointerdown", choose);   // one handler covers mouse and touch
@@ -4878,22 +4995,13 @@ function showStageComplete(world, stage, starCount, res) {
   $("sdUnlock").textContent = note;
 
   const hasNext = game.cs < world.stages.length;
-  const isBoss = !!stage.boss;
 
-  // Clearing a stage earns one upgrade. It is claimed on the way out of the
-  // results screen, whichever exit the player takes, so the reward is never
-  // skipped -- and the results screen itself is untouched.
-  upgradePending = rollUpgradeChoices(3, isBoss).length > 0;
-  const claim = (after) => () => {
-    audio();
-    if (upgradePending) {
-      upgradePending = false;
-      showUpgradeChoice(after, { boss: isBoss });
-    } else after();
-  };
+  // The upgrade is no longer claimed here: every stage opens with the
+  // choice instead, so the very first stage of the campaign gets one too.
+  // The results screen just reports the run.
+  const claim = (after) => () => { audio(); after(); };
 
-  $("sdNext").textContent = upgradePending ? "CLAIM UPGRADE"
-    : (hasNext ? "NEXT STAGE" : "WORLD SELECT");
+  $("sdNext").textContent = hasNext ? "NEXT STAGE" : "WORLD SELECT";
   $("sdNext").onclick = claim(() => {
     if (hasNext) launchStage(world.id, game.cs + 1);
     else if (pendingWorldComplete) showWorldComplete();
@@ -4911,7 +5019,6 @@ function showStageComplete(world, stage, starCount, res) {
 }
 
 let pendingWorldComplete = null;
-let upgradePending = false;
 
 function showWorldComplete() {
   const { world, res } = pendingWorldComplete;
@@ -5247,6 +5354,7 @@ function update(dt) {
   updateAtmos(dt);
   if (game.newEnemyTime > 0) game.newEnemyTime -= 16.6 * dt;
   if (game.newWeaponTime > 0) game.newWeaponTime -= 16.6 * dt;
+  if (game.lastUpgradeTime > 0) game.lastUpgradeTime -= 16.6 * dt;
   if (game.bossWarnTime > 0) {
     game.bossWarnTime -= 16.6 * dt;
     if (game.bossWarnTime <= 0 && game.bossPending) {
@@ -5605,6 +5713,18 @@ function drawHUD(g) {
     g.fillText("CANCEL", W / 2, cy2 + ch2 * 0.66);
   }
 
+  // last upgrade taken -- a short reminder that this stage made you stronger
+  if (game.lastUpgradeTime > 0 && game.lastUpgrade) {
+    const k = clamp(game.lastUpgradeTime / 700, 0, 1);
+    g.save();
+    g.globalAlpha = k;
+    g.textAlign = "left";
+    g.font = "bold 12px 'Courier New', monospace";
+    g.fillStyle = "#ffd76a";
+    g.fillText("\u26A1 " + game.lastUpgrade, 16, H - 150);
+    g.restore();
+  }
+
   // active power-ups: only shown while running
   {
     let row = 0;
@@ -5898,7 +6018,7 @@ function render() {
       ctx.stroke();
     }
     // remaining-time arc
-    const frac = clamp(left / ITEMS.shield.duration, 0, 1);
+    const frac = clamp(left / gstat("shield").duration, 0, 1);
     ctx.globalAlpha = 0.85; ctx.lineWidth = 2.5;
     ctx.strokeStyle = "#bff0ff";
     ctx.beginPath(); ctx.arc(player.x, player.y, rr + 5, -Math.PI / 2, -Math.PI / 2 + TAU * frac);

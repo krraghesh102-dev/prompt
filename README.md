@@ -361,11 +361,20 @@ plus its art — not a change to the pickup system.
 
 ## Upgrades
 
-Clearing a campaign stage earns one upgrade. The existing results screen is
-unchanged — its continue button becomes **CLAIM UPGRADE**, which opens a
-three-card choice, then carries on to wherever you were going. Every exit
-(next stage, replay, stage select) claims it first, so the reward is never
-skipped. Boss stages reward one too, before the world cinematic.
+**Every stage opens with the choice**, boss stages included — including the
+very first stage of the campaign. The stage is built and then held:
+`game.state` is `"upgrade"` and `update()` only runs in `"play"`, so wave 1
+cannot begin behind the popup. Pick one of three and the stage starts.
+
+The grant is recorded on the stage's own save entry, so quitting and
+re-entering the same stage does not hand out a second upgrade; a stage you
+have never played always offers one. A save written before this carries no
+flag, and a stage already cleared counts as having had its pick.
+
+Progression is meant to read as *my weapons are getting better*, not *my
+streak is getting longer*. The combo is still a **score** bonus (1x → 2.5x)
+and still announces its tiers, but as a small float rather than a banner —
+the power curve is the upgrades.
 
 Upgrades have four rarities — common, rare, epic, legendary — which set both
 how big the step is and how often it is offered. The tier is rolled first and
@@ -379,11 +388,44 @@ not from the weapon table's existence) or a `feature` (must be active), and
 anything already at level 5 leaves the pool. The remainder is shuffled and
 three are taken, preferring three different categories.
 
+Offers lean toward combat. Rarity still picks the tier; a category priority
+table then picks the row inside it, so roughly three quarters of what you
+are shown makes your shooting stronger while survival and utility stay in
+the mix. No two cards in an offer share a category, so you never get the
+same stat three times.
+
+Every row changes real gameplay, never a displayed number — measured
+end to end at level 3:
+
+| Upgrade | Effect |
+|---|---|
+| Damage | 26 → 33.8 |
+| Fire rate | 210ms → 165.9ms between shots |
+| Accuracy | 0.035 → 0.022 rad spread |
+| Reload | 900ms → 684ms |
+| Magazine | 12 → 18 rounds |
+| Round speed | 14 → 19 px/frame |
+| Knockback | 3 → 4.35 |
+| Range | ×1.3 bullet life |
+| **Multi shot** | 1 → 3 rounds per trigger pull |
+| Crit chance / damage | 0 → 12% · ×1.5 → ×1.95 |
+| Piercing | 0 → 3 enemies |
+| Grenade / blast / layer | damage, radius and duration all scale |
+
+**Multi shot** is the headline one: one trigger pull, one round of ammo,
+several bullets fanned either side of the aim. Each is an ordinary
+independent `Bullet` carrying full damage through the same single collision
+path, so a three-round volley into one enemy still kills once, scores once
+and drops once. The **shotgun is deliberately excluded** — it already fires
+a pellet spread, and stacking a multiplier on that is the duplicate-pellet
+trap; stream and chain weapons have no single projectile to duplicate.
+
 Categories: per-weapon damage / fire rate / reload / magazine / accuracy /
-ammo capacity / range, plus weapon-specific ones (shotgun pellets and
-knockback, sniper crit damage, blast radius and shell speed, burn duration,
-tesla chain count and range, freeze duration); player health, armor, move
-speed, stamina and sprint recovery; crit chance, crit damage and knockback;
+multi shot / knockback / round speed / ammo capacity / range, plus
+weapon-specific ones (shotgun pellets, sniper crit damage, blast radius and
+shell speed, burn duration, tesla chain count and range, freeze duration);
+ability rows for grenade, blast and the security layer; player health,
+armor, move speed, stamina and sprint recovery; crit chance, crit damage and knockback;
 ammo and medkit potency; magnet duration and range. Universal rows
 (**Weapon Mastery**, **Combat Training**, **Fast Hands**) improve every
 unlocked weapon at once and are rarer. Legendary behaviour upgrades change
