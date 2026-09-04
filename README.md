@@ -49,6 +49,13 @@ ratio, so the game fills a phone edge to edge.
 Two modes from the main menu: **CAMPAIGN** and **ENDLESS**. Endless is the
 original survival mode, untouched.
 
+> **Test mode is currently ON.** `UNLOCK_ALL` at the top of the save section
+> in `index.html` is set to `true`, so every world and stage is playable
+> immediately and the world-select screen is tagged `TEST MODE: ALL UNLOCKED`.
+> Set it to `false` to restore normal unlocking — stars, completion and best
+> scores are earned and saved as usual while it is on, so flipping it back
+> reveals real progress rather than resetting it.
+
 Campaign runs **6 worlds x 5 stages**. Worlds and stages unlock strictly in
 order: World 1 Stage 1 is open, clearing a stage opens the next, and clearing
 a world's boss stage opens the next world. Nothing is entered by hand.

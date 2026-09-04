@@ -47,7 +47,7 @@
     text-shadow: 0 0 18px rgba(125,213,63,.45), 3px 3px 0 #3d1013;
   }
   h2 { margin: 0 0 14px; font-size: clamp(20px,4vw,30px); letter-spacing: 3px; color: var(--blood); }
-  .sub { color: #9aa694; letter-spacing: 2px; margin-bottom: 22px; font-size: 13px; }
+  .sub { color: #9aa694; letter-spacing: 2px; margin-bottom: 22px; font-size: 13px; white-space: pre-line; }
   .keys { display: grid; gap: 6px; margin: 0 auto 24px; font-size: 13px; color: #b9c4b1; line-height: 1.7; }
   .keys b { color: var(--toxic); }
   button {
@@ -602,6 +602,12 @@ const WORLDS = [
    untouched by anything the campaign does. */
 const SAVE_KEY = "deadzone_campaign_v1";
 
+/* TEST MODE -- every world and stage is playable regardless of progress.
+   Set this to false to restore sequential unlocking; nothing else needs to
+   change. Stars, completion and best scores are still earned and saved
+   normally while it is on, so turning it off later reveals real progress. */
+const UNLOCK_ALL = true;
+
 const Progress = {
   data: null,
   blank() {
@@ -609,9 +615,9 @@ const Progress = {
     for (const w of WORLDS) {
       const stages = {};
       w.stages.forEach((st, i) => {
-        stages[i + 1] = { unlocked: w.id === 1 && i === 0, completed: false, stars: 0, best: 0 };
+        stages[i + 1] = { unlocked: UNLOCK_ALL || (w.id === 1 && i === 0), completed: false, stars: 0, best: 0 };
       });
-      worlds[w.id] = { unlocked: w.id === 1, completed: false, stages };
+      worlds[w.id] = { unlocked: UNLOCK_ALL || w.id === 1, completed: false, stages };
     }
     return { version: 1, worlds, highestWave: 0 };
   },
@@ -620,10 +626,15 @@ const Progress = {
       const raw = localStorage.getItem(SAVE_KEY);
       if (raw) {
         const parsed = JSON.parse(raw);
-        if (parsed && parsed.worlds) { this.data = this.migrate(parsed); return this.data; }
+        if (parsed && parsed.worlds) {
+          this.data = this.migrate(parsed);
+          this.applyUnlockAll();
+          return this.data;
+        }
       }
     } catch (e) { /* corrupt or unavailable storage falls through to a fresh save */ }
     this.data = this.blank();
+    this.applyUnlockAll();
     return this.data;
   },
   /* Adding a world or stage later must not wipe an existing save, so merge
@@ -649,6 +660,16 @@ const Progress = {
     base.highestWave = Math.max(0, saved.highestWave | 0);
     return base;
   },
+  /* Opens everything while UNLOCK_ALL is set. Only the `unlocked` flags are
+     touched, so real completion and stars survive switching it back off. */
+  applyUnlockAll() {
+    if (!UNLOCK_ALL) return;
+    for (const wid in this.data.worlds) {
+      const w = this.data.worlds[wid];
+      w.unlocked = true;
+      for (const sid in w.stages) w.stages[sid].unlocked = true;
+    }
+  },
   save() {
     try { localStorage.setItem(SAVE_KEY, JSON.stringify(this.data)); }
     catch (e) { /* private mode: progress just will not persist */ }
@@ -660,7 +681,7 @@ const Progress = {
     return Object.values(w.stages).reduce((a, s) => a + s.stars, 0);
   },
   totalStars() { return WORLDS.reduce((a, w) => a + this.worldStars(w.id), 0); },
-  reset() { this.data = this.blank(); this.save(); }
+  reset() { this.data = this.blank(); this.applyUnlockAll(); this.save(); }
 };
 Progress.load();
 
@@ -1744,7 +1765,8 @@ function showWorlds() {
   game.state = "worlds";
   const grid = $("worldGrid");
   grid.innerHTML = "";
-  $("worldsSub").textContent = "CAMPAIGN  \u00b7  " + Progress.totalStars() + " / " + (WORLDS.length * 15) + " STARS";
+  $("worldsSub").textContent = "CAMPAIGN  \u00b7  " + Progress.totalStars() + " / " + (WORLDS.length * 15) + " STARS"
+    + (UNLOCK_ALL ? "  \u00b7  TEST MODE: ALL UNLOCKED" : "");
   for (const w of WORLDS) {
     const pw = Progress.world(w.id);
     const card = document.createElement("div");
@@ -1884,7 +1906,7 @@ function showWorldComplete() {
 let soundOn = localStorage.getItem("deadzone_sound") !== "0";
 function refreshSettings() {
   $("setSound").textContent = "SOUND: " + (soundOn ? "ON" : "OFF");
-  $("setInfo").textContent = "CAMPAIGN STARS " + Progress.totalStars() + " / " + (WORLDS.length * 15) +
+  $("setInfo").textContent = (UNLOCK_ALL ? "TEST MODE \u00b7 ALL STAGES UNLOCKED\n" : "") + "CAMPAIGN STARS " + Progress.totalStars() + " / " + (WORLDS.length * 15) +
     "   \u00b7   ENDLESS BEST " + game.best.toLocaleString() +
     "   \u00b7   BEST WAVE " + Progress.data.highestWave;
 }
