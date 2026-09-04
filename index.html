@@ -511,6 +511,7 @@ const SFX = {
   shieldOn:() => { blip("sine", 300, 0.18, 0.08, 780); setTimeout(() => blip("sine", 640, 0.22, 0.07, 900), 120); },
   shieldHit:() => blip("sine", 900, 0.10, 0.07, 420),
   shieldOff:() => blip("sine", 620, 0.26, 0.06, 180),
+  scream:  () => { blip("sawtooth", 620, 0.45, 0.09, 140); noise(0.3, 0.08, 900); },
   magnet:  () => { blip("sine", 520, 0.10, 0.06, 880); setTimeout(() => blip("sine", 880, 0.14, 0.05, 1250), 90); },
   slurp:   () => blip("sine", 700, 0.05, 0.035, 1100),
   blast:   () => { noise(0.7, 0.32, 1600); blip("sawtooth", 150, 0.6, 0.15, 34);
@@ -1156,6 +1157,164 @@ function buildPropLayer() {
 }
 function invalidatePropLayer() { propKey = ""; }
 
+
+/* ================= ENEMY PROGRESSION =================
+   Which enemies exist at all is decided here, per world and stage. Nothing
+   spawns that this table does not list, so World 1 cannot produce a tank
+   however unlucky the roll is. Weights are relative, not percentages. */
+const ENEMY_TIER = {            // 0 = basic, higher = more specialised
+  walker: 0, runner: 0, brute: 1, spitter: 1, crawler: 1,
+  exploder: 2, stalker: 2, screamer: 3, shieldz: 3, tank: 4
+};
+
+const SPAWN_TABLE = {
+  1: {  // THE OUTBREAK -- teaches the basics, nothing exotic
+    1: { walker: 1.00 },
+    2: { walker: 0.85, runner: 0.15 },
+    3: { walker: 0.62, runner: 0.38 },
+    4: { walker: 0.52, runner: 0.36, brute: 0.12 },
+    5: { walker: 0.46, runner: 0.36, brute: 0.18 }
+  },
+  2: {  // DEAD CITY -- first specialists: spitter, then crawler
+    1: { walker: 0.60, runner: 0.40 },
+    2: { walker: 0.48, runner: 0.34, brute: 0.18 },
+    3: { walker: 0.40, runner: 0.30, brute: 0.12, spitter: 0.18 },
+    4: { walker: 0.30, runner: 0.28, brute: 0.12, spitter: 0.14, crawler: 0.16 },
+    5: { walker: 0.26, runner: 0.24, brute: 0.20, spitter: 0.18, crawler: 0.12 }
+  },
+  3: {  // NIGHTFALL -- exploder, then stalker
+    1: { walker: 0.44, runner: 0.30, crawler: 0.26 },
+    2: { walker: 0.34, runner: 0.24, crawler: 0.20, spitter: 0.22 },
+    3: { walker: 0.28, runner: 0.22, crawler: 0.16, spitter: 0.14, exploder: 0.20 },
+    4: { walker: 0.22, runner: 0.20, crawler: 0.14, spitter: 0.12, exploder: 0.16, stalker: 0.16 },
+    5: { walker: 0.20, runner: 0.18, brute: 0.14, crawler: 0.12, spitter: 0.12, exploder: 0.12, stalker: 0.12 }
+  },
+  4: {  // INFECTED FACTORY -- screamer, then the shield
+    1: { walker: 0.28, runner: 0.22, brute: 0.16, crawler: 0.14, exploder: 0.20 },
+    2: { walker: 0.22, runner: 0.18, brute: 0.14, spitter: 0.14, exploder: 0.16, screamer: 0.16 },
+    3: { walker: 0.18, runner: 0.16, brute: 0.12, spitter: 0.12, exploder: 0.14, screamer: 0.10, shieldz: 0.18 },
+    4: { walker: 0.14, runner: 0.16, brute: 0.12, crawler: 0.12, spitter: 0.10, exploder: 0.14, stalker: 0.08, screamer: 0.08, shieldz: 0.16 },
+    5: { walker: 0.14, runner: 0.14, brute: 0.14, crawler: 0.10, spitter: 0.12, exploder: 0.14, screamer: 0.08, shieldz: 0.14 }
+  },
+  5: {  // THE QUARANTINE -- the tank arrives
+    1: { walker: 0.20, runner: 0.18, brute: 0.14, crawler: 0.12, spitter: 0.12, exploder: 0.12, screamer: 0.12 },
+    2: { walker: 0.16, runner: 0.16, brute: 0.12, crawler: 0.10, spitter: 0.12, exploder: 0.12, screamer: 0.08, shieldz: 0.14 },
+    3: { walker: 0.14, runner: 0.14, brute: 0.12, crawler: 0.10, spitter: 0.10, exploder: 0.12, screamer: 0.06, shieldz: 0.12, tank: 0.10 },
+    4: { walker: 0.12, runner: 0.14, brute: 0.10, crawler: 0.10, spitter: 0.10, exploder: 0.12, stalker: 0.08, screamer: 0.06, shieldz: 0.10, tank: 0.08 },
+    5: { walker: 0.12, runner: 0.12, brute: 0.12, crawler: 0.10, spitter: 0.10, exploder: 0.12, stalker: 0.06, screamer: 0.06, shieldz: 0.12, tank: 0.08 }
+  },
+  6: {  // THE WASTELANDS -- everything, but weighted, never a free-for-all
+    1: { walker: 0.16, runner: 0.18, brute: 0.14, crawler: 0.12, spitter: 0.12, exploder: 0.12, shieldz: 0.10, screamer: 0.06 },
+    2: { walker: 0.14, runner: 0.16, brute: 0.14, crawler: 0.12, spitter: 0.12, exploder: 0.12, stalker: 0.08, shieldz: 0.10, screamer: 0.06, tank: 0.06 },
+    3: { walker: 0.12, runner: 0.14, brute: 0.14, crawler: 0.12, spitter: 0.12, exploder: 0.12, stalker: 0.10, shieldz: 0.12, screamer: 0.06, tank: 0.08 },
+    4: { walker: 0.10, runner: 0.14, brute: 0.14, crawler: 0.12, spitter: 0.12, exploder: 0.12, stalker: 0.10, shieldz: 0.12, screamer: 0.06, tank: 0.10 },
+    5: { walker: 0.10, runner: 0.12, brute: 0.14, crawler: 0.12, spitter: 0.12, exploder: 0.14, stalker: 0.10, shieldz: 0.12, screamer: 0.06, tank: 0.10 }
+  }
+};
+
+/* Per-world stat scaling. Deliberately gentle: the curve should come mostly
+   from which enemies appear, not from multiplying numbers. */
+const WORLD_SCALE = {
+  1: { hp: 1.00, speed: 1.00, dmg: 1.00 },
+  2: { hp: 1.12, speed: 1.03, dmg: 1.05 },
+  3: { hp: 1.26, speed: 1.07, dmg: 1.10 },
+  4: { hp: 1.42, speed: 1.10, dmg: 1.16 },
+  5: { hp: 1.60, speed: 1.13, dmg: 1.22 },
+  6: { hp: 1.82, speed: 1.17, dmg: 1.30 }
+};
+
+/* How many of each specialist may be alive at once. Without these a bad
+   roll can stack four tanks or a screamer chain that never ends. */
+const SPAWN_LIMITS = {
+  perType:  { tank: 1, screamer: 1, exploder: 3, stalker: 3, shieldz: 3, brute: 4 },
+  special:  6,     // total of tier>=2 alive at once
+  hordeCap: 46     // hard ceiling, also respected by screamer calls
+};
+
+function aliveOf(type) {
+  let n = 0;
+  for (const z of zombies) if (!z.dead && z.type === type) n++;
+  return n;
+}
+function aliveSpecials() {
+  let n = 0;
+  for (const z of zombies) if (!z.dead && (ENEMY_TIER[z.type] || 0) >= 2) n++;
+  return n;
+}
+
+/* Picks a type for one spawn: table for this world/stage, biased toward
+   basics on early waves, then filtered by the concurrency limits. */
+function pickEnemyType(worldId, stageNo, waveIdx, waveCount) {
+  const table = (SPAWN_TABLE[worldId] && SPAWN_TABLE[worldId][stageNo]) || SPAWN_TABLE[1][1];
+  // wave 1 of any stage leans basic; the last wave uses the table as written
+  const ramp = 0.34 + 0.66 * ((waveIdx - 1) / Math.max(1, waveCount - 1));
+  const specialsFull = aliveSpecials() >= SPAWN_LIMITS.special;
+
+  const entries = [];
+  let total = 0;
+  for (const type in table) {
+    const tier = ENEMY_TIER[type] || 0;
+    const cap = SPAWN_LIMITS.perType[type];
+    if (cap !== undefined && aliveOf(type) >= cap) continue;      // too many already
+    if (tier >= 2 && specialsFull) continue;                      // pressure valve
+    const w = table[type] * (tier === 0 ? 1 : Math.pow(ramp, tier * 0.7));
+    if (w <= 0) continue;
+    entries.push([type, w]); total += w;
+  }
+  if (!entries.length) return "walker";                           // always something to fight
+  let roll = Math.random() * total;
+  for (const [type, w] of entries) { roll -= w; if (roll <= 0) return type; }
+  return entries[entries.length - 1][0];
+}
+
+/* Endless keeps its own, separate ladder: types unlock by wave number so
+   early endless waves stay simple. */
+const ENDLESS_UNLOCK = [
+  { wave: 1,  types: { walker: 1 } },
+  { wave: 2,  types: { walker: 0.8, runner: 0.2 } },
+  { wave: 4,  types: { walker: 0.55, runner: 0.35, brute: 0.10 } },
+  { wave: 6,  types: { walker: 0.42, runner: 0.30, brute: 0.14, spitter: 0.14 } },
+  { wave: 8,  types: { walker: 0.32, runner: 0.26, brute: 0.14, spitter: 0.14, crawler: 0.14 } },
+  { wave: 11, types: { walker: 0.24, runner: 0.22, brute: 0.14, spitter: 0.12, crawler: 0.12, exploder: 0.16 } },
+  { wave: 14, types: { walker: 0.20, runner: 0.18, brute: 0.14, spitter: 0.10, crawler: 0.10, exploder: 0.14, stalker: 0.14 } },
+  { wave: 17, types: { walker: 0.16, runner: 0.16, brute: 0.14, spitter: 0.10, crawler: 0.10, exploder: 0.12, stalker: 0.10, screamer: 0.06, shieldz: 0.06 } },
+  { wave: 21, types: { walker: 0.14, runner: 0.14, brute: 0.14, spitter: 0.10, crawler: 0.10, exploder: 0.12, stalker: 0.10, screamer: 0.06, shieldz: 0.08, tank: 0.02 } }
+];
+function endlessTable(wave) {
+  let t = ENDLESS_UNLOCK[0].types;
+  for (const step of ENDLESS_UNLOCK) if (wave >= step.wave) t = step.types;
+  return t;
+}
+function pickEndlessType(wave) {
+  const table = endlessTable(wave);
+  const entries = [];
+  let total = 0;
+  for (const type in table) {
+    const cap = SPAWN_LIMITS.perType[type];
+    if (cap !== undefined && aliveOf(type) >= cap) continue;
+    if ((ENEMY_TIER[type] || 0) >= 2 && aliveSpecials() >= SPAWN_LIMITS.special) continue;
+    entries.push([type, table[type]]); total += table[type];
+  }
+  if (!entries.length) return "walker";
+  let roll = Math.random() * total;
+  for (const [type, w] of entries) { roll -= w; if (roll <= 0) return type; }
+  return entries[entries.length - 1][0];
+}
+
+/* A brief, non-blocking notice the first time a type is met in campaign. */
+const ENEMY_LABEL = {
+  runner: "RUNNER", brute: "BRUTE", spitter: "SPITTER", crawler: "CRAWLER",
+  exploder: "EXPLODER", stalker: "STALKER", screamer: "SCREAMER",
+  shieldz: "SHIELD ZOMBIE", tank: "TANK"
+};
+const seenEnemies = {};
+function noteFirstSighting(type) {
+  if (game.mode !== "campaign" || seenEnemies[type] || !ENEMY_LABEL[type]) return;
+  seenEnemies[type] = true;
+  game.newEnemy = ENEMY_LABEL[type];
+  game.newEnemyTime = 2600;
+}
+
 /* ---------------- weapons ---------------- */
 const WEAPONS = [
   { name: "PISTOL",  short: "PSTL", dmg: 26, rof: 210, mag: 12, reload: 900,  spread: 0.035, speed: 14, pellets: 1, auto: false,
@@ -1634,6 +1793,173 @@ const ZSKINS = {
   }
 };
 
+
+/* ---- palettes per world art set ----
+   New enemy types share one silhouette per type (so a crawler always reads
+   as a crawler) but are painted in the current world's palette, so they
+   still belong to that chapter. */
+const SET_PAL = {
+  outbreak:     { body:"#8a9a63", edge:"#3d5522", limb:"#6a5a42", head:"#c8a882", eye:"#ff4d4d" },
+  urban:        { body:"#5d6b76", edge:"#232a33", limb:"#2e3540", head:"#8d8579", eye:"#ff5252" },
+  night:        { body:"#2a333c", edge:"#0e1318", limb:"#161c22", head:"#1b232b", eye:"#ffe14d" },
+  industrial:   { body:"#7d8a4a", edge:"#39401f", limb:"#4a4034", head:"#94a05a", eye:"#c6ff4d" },
+  experimental: { body:"#c3ced2", edge:"#7d888c", limb:"#96a3a8", head:"#b9c4c8", eye:"#7ef0d0" },
+  evolved:      { body:"#8a7d4f", edge:"#3c3a22", limb:"#4a4736", head:"#8c8158", eye:"#ff7a2b" }
+};
+const DEFAULT_PAL = SET_PAL.outbreak;
+
+/* One silhouette per enemy type, tinted by world. Each is deliberately a
+   different shape -- not a recolour -- so a threat is identifiable at a
+   glance in a crowded wave. */
+const TYPE_SHAPES = {
+  crawler(g, z, r, lurch, flash, P) {              // low, wide, splayed
+    g.strokeStyle = P.limb; g.lineWidth = r * 0.22; g.lineCap = "round";
+    for (const sgn of [-1, 1]) {
+      g.beginPath(); g.moveTo(-r * 0.2, sgn * r * 0.3);
+      g.lineTo(r * 0.95, sgn * (r * 0.9 + lurch * sgn)); g.stroke();
+      g.beginPath(); g.moveTo(-r * 0.5, sgn * r * 0.3);
+      g.lineTo(-r * 1.1, sgn * (r * 0.7 - lurch * sgn)); g.stroke();
+    }
+    g.fillStyle = flash ? "#fff" : P.body;
+    g.beginPath(); g.ellipse(0, 0, r * 1.24, r * 0.58, 0, 0, TAU); g.fill();
+    g.strokeStyle = P.edge; g.lineWidth = 2; g.stroke();
+    g.fillStyle = flash ? "#fff" : P.head;
+    g.beginPath(); g.ellipse(r * 0.8, 0, r * 0.44, r * 0.3, 0, 0, TAU); g.fill();
+    g.fillStyle = P.eye;
+    g.beginPath(); g.arc(r * 0.95, -r * 0.13, r * 0.1, 0, TAU); g.fill();
+    g.beginPath(); g.arc(r * 0.95, r * 0.13, r * 0.1, 0, TAU); g.fill();
+  },
+
+  exploder(g, z, r, lurch, flash, P) {             // swollen, unstable, seams glow
+    const primed = z.primed;
+    const beat = primed ? (1 - z.fuse / z.t.fuse) : 0;
+    if (primed) {                                   // telegraph: expanding warning ring
+      g.save(); g.rotate(-z.angle);
+      g.globalAlpha = 0.25 + Math.sin(game.time / 45) * 0.2;
+      g.strokeStyle = "#ff6b2b"; g.lineWidth = 3;
+      g.beginPath(); g.arc(0, 0, z.t.radius * (0.35 + beat * 0.65), 0, TAU); g.stroke();
+      g.restore();
+    }
+    g.strokeStyle = P.limb; g.lineWidth = r * 0.3; g.lineCap = "round";
+    g.beginPath();
+    g.moveTo(0, -r * 0.5); g.lineTo(r * 0.95, -r * 0.75 + lurch);
+    g.moveTo(0, r * 0.5);  g.lineTo(r * 0.95, r * 0.75 - lurch); g.stroke();
+    const swell = 1 + (primed ? Math.sin(game.time / 40) * 0.09 : Math.sin(game.time / 260) * 0.03);
+    g.fillStyle = flash ? "#fff" : (primed ? "#e8823c" : P.body);
+    g.beginPath(); g.arc(0, 0, r * 1.12 * swell, 0, TAU); g.fill();
+    g.strokeStyle = "#5e2f16"; g.lineWidth = 2; g.stroke();
+    g.fillStyle = primed ? "rgba(255,190,90,.85)" : "rgba(240,140,60,.55)";   // pustules
+    for (const [ox, oy, rr] of [[-0.35,-0.4,0.34],[0.15,0.42,0.28],[-0.5,0.25,0.24],[0.3,-0.2,0.2]]) {
+      g.beginPath(); g.arc(ox * r, oy * r, rr * r, 0, TAU); g.fill();
+    }
+    g.strokeStyle = primed ? "#fff0b0" : "rgba(255,160,70,.5)"; g.lineWidth = 1.6;
+    g.beginPath(); g.arc(0, 0, r * 0.72, -0.9, 0.9); g.stroke();
+    g.fillStyle = flash ? "#fff" : P.head;
+    g.beginPath(); g.arc(r * 0.85, 0, r * 0.4, 0, TAU); g.fill();
+    g.fillStyle = primed ? "#fff0b0" : "#ff7a2b";
+    g.beginPath(); g.arc(r * 0.97, -r * 0.14, r * 0.1, 0, TAU); g.fill();
+    g.beginPath(); g.arc(r * 0.97, r * 0.14, r * 0.1, 0, TAU); g.fill();
+  },
+
+  tank(g, z, r, lurch, flash, P) {                 // enormous, plated, heavy
+    g.strokeStyle = P.limb; g.lineWidth = r * 0.44; g.lineCap = "round";
+    g.beginPath();
+    g.moveTo(-r * 0.1, -r * 0.62); g.lineTo(r * 1.15, -r * 0.72 + lurch);
+    g.moveTo(-r * 0.1, r * 0.62);  g.lineTo(r * 1.15, r * 0.72 - lurch); g.stroke();
+    g.fillStyle = flash ? "#fff" : "#7d8470";
+    g.beginPath(); g.arc(r * 1.2, -r * 0.74, r * 0.3, 0, TAU); g.fill();
+    g.beginPath(); g.arc(r * 1.2, r * 0.74, r * 0.3, 0, TAU); g.fill();
+    g.fillStyle = flash ? "#fff" : P.body;
+    g.beginPath(); g.ellipse(0, 0, r * 1.02, r * 1.16, 0, 0, TAU); g.fill();
+    g.strokeStyle = P.edge; g.lineWidth = 3.5; g.stroke();
+    g.fillStyle = "#4a4f3e";                        // slab armour
+    g.beginPath(); g.moveTo(r * 0.05, -r * 0.98); g.lineTo(r * 0.8, -r * 0.42);
+    g.lineTo(r * 0.8, r * 0.42); g.lineTo(r * 0.05, r * 0.98); g.closePath(); g.fill();
+    g.strokeStyle = "#22261a"; g.lineWidth = 2; g.stroke();
+    g.fillStyle = "#8f9682";                        // rivets
+    for (let i = -1; i <= 1; i++) { g.beginPath(); g.arc(r * 0.42, i * r * 0.42, r * 0.08, 0, TAU); g.fill(); }
+    g.fillStyle = flash ? "#fff" : P.head;
+    g.beginPath(); g.arc(r * 0.5, 0, r * 0.36, 0, TAU); g.fill();
+    g.fillStyle = P.eye;
+    g.beginPath(); g.arc(r * 0.66, -r * 0.13, r * 0.09, 0, TAU); g.fill();
+    g.beginPath(); g.arc(r * 0.66, r * 0.13, r * 0.09, 0, TAU); g.fill();
+  },
+
+  screamer(g, z, r, lurch, flash, P) {             // distended throat and jaw
+    const warning = z.warnUntil && game.time < z.warnUntil;
+    if (warning) {
+      g.save(); g.rotate(-z.angle);
+      const t = 1 - (z.warnUntil - game.time) / z.t.warn;
+      g.globalAlpha = 0.35 * (1 - t);
+      g.strokeStyle = "#ff7ae0"; g.lineWidth = 3;
+      g.beginPath(); g.arc(0, 0, r + t * 120, 0, TAU); g.stroke();
+      g.restore();
+    }
+    g.strokeStyle = P.limb; g.lineWidth = r * 0.26; g.lineCap = "round";
+    g.beginPath();
+    g.moveTo(0, -r * 0.5); g.lineTo(r * 0.8, -r * 0.9 + lurch);
+    g.moveTo(0, r * 0.5);  g.lineTo(r * 0.8, r * 0.9 - lurch); g.stroke();
+    g.fillStyle = flash ? "#fff" : P.body;
+    g.beginPath(); g.ellipse(-r * 0.1, 0, r * 0.86, r * 0.78, 0, 0, TAU); g.fill();
+    g.strokeStyle = P.edge; g.lineWidth = 2; g.stroke();
+    // bulging throat sac, inflating before a call
+    const sac = warning ? 1 + Math.sin(game.time / 55) * 0.22 : 1;
+    g.fillStyle = warning ? "#ff9ae8" : "#b56ab5";
+    g.beginPath(); g.ellipse(r * 0.5, 0, r * 0.52 * sac, r * 0.62 * sac, 0, 0, TAU); g.fill();
+    g.strokeStyle = "#4d2450"; g.lineWidth = 1.8; g.stroke();
+    g.fillStyle = flash ? "#fff" : P.head;                       // small head, wide jaw
+    g.beginPath(); g.arc(r * 0.98, 0, r * 0.32, 0, TAU); g.fill();
+    g.fillStyle = "#2a1230";
+    g.beginPath(); g.ellipse(r * 1.15, 0, r * 0.2, r * 0.3 * sac, 0, 0, TAU); g.fill();
+    g.fillStyle = P.eye;
+    g.beginPath(); g.arc(r * 0.95, -r * 0.2, r * 0.09, 0, TAU); g.fill();
+    g.beginPath(); g.arc(r * 0.95, r * 0.2, r * 0.09, 0, TAU); g.fill();
+  },
+
+  shieldz(g, z, r, lurch, flash, P) {              // riot plate on a slow-turning arm
+    g.strokeStyle = P.limb; g.lineWidth = r * 0.3; g.lineCap = "round";
+    g.beginPath();
+    g.moveTo(0, -r * 0.5); g.lineTo(r * 0.8, -r * 0.55 + lurch);
+    g.moveTo(0, r * 0.5);  g.lineTo(r * 0.8, r * 0.55 - lurch); g.stroke();
+    g.fillStyle = flash ? "#fff" : P.body;
+    g.beginPath(); g.arc(0, 0, r * 0.94, 0, TAU); g.fill();
+    g.strokeStyle = P.edge; g.lineWidth = 2; g.stroke();
+    g.fillStyle = flash ? "#fff" : P.head;
+    g.beginPath(); g.arc(r * 0.42, 0, r * 0.46, 0, TAU); g.fill();
+    g.fillStyle = P.eye;
+    g.beginPath(); g.arc(r * 0.6, -r * 0.17, r * 0.1, 0, TAU); g.fill();
+    g.beginPath(); g.arc(r * 0.6, r * 0.17, r * 0.1, 0, TAU); g.fill();
+    // the plate sits on the guard angle, which lags the body -- drawn last
+    // so the protected side is unmistakable
+    g.save();
+    g.rotate(z.guard - z.angle);
+    g.fillStyle = "#8f97a8";
+    g.beginPath();
+    g.moveTo(r * 0.95, -r * 1.05); g.lineTo(r * 1.35, -r * 0.75);
+    g.lineTo(r * 1.35, r * 0.75);  g.lineTo(r * 0.95, r * 1.05);
+    g.closePath(); g.fill();
+    g.strokeStyle = "#3a404b"; g.lineWidth = 2.5; g.stroke();
+    g.strokeStyle = "rgba(255,255,255,.30)"; g.lineWidth = 2;
+    g.beginPath(); g.moveTo(r * 1.12, -r * 0.8); g.lineTo(r * 1.12, r * 0.8); g.stroke();
+    g.restore();
+  },
+
+  stalker(g, z, r, lurch, flash, P) {              // thin, long-limbed, eyeshine
+    g.strokeStyle = P.limb; g.lineWidth = r * 0.2; g.lineCap = "round";
+    g.beginPath();
+    g.moveTo(0, -r * 0.34); g.lineTo(r * 1.9, -r * 0.4 + lurch * 2);
+    g.moveTo(0, r * 0.34);  g.lineTo(r * 1.9, r * 0.4 - lurch * 2); g.stroke();
+    g.fillStyle = flash ? "#fff" : P.body;
+    g.beginPath(); g.ellipse(0, 0, r * 0.86, r * 0.6, 0, 0, TAU); g.fill();
+    g.strokeStyle = P.edge; g.lineWidth = 1.6; g.stroke();
+    g.fillStyle = flash ? "#fff" : P.head;
+    g.beginPath(); g.ellipse(r * 0.62, 0, r * 0.44, r * 0.3, 0, 0, TAU); g.fill();
+    g.fillStyle = "#9dff5c";
+    g.beginPath(); g.arc(r * 0.78, -r * 0.16, r * 0.11, 0, TAU); g.fill();
+    g.beginPath(); g.arc(r * 0.78, r * 0.16, r * 0.11, 0, TAU); g.fill();
+  }
+};
+
 /* Endless keeps the original look; campaign resolves its world's set. */
 function zombieSkinSet() {
   const th = game.theme;
@@ -1968,7 +2294,18 @@ const ZTYPES = {
   boss:   { hp: 950, speed: 0.62, r: 34, dmg: 30, points: 900, color: "#8c3b3b", dark: "#4a1c1c", touch: 700 },
   stalker:{ hp: 34,  speed: 1.35, r: 12, dmg: 11, points: 26, color: "#2a333c", dark: "#12181e", touch: 560 },
   crawler:{ hp: 26,  speed: 1.60, r: 11, dmg: 8,  points: 20, color: "#2f3a44", dark: "#0e1318", touch: 500 },
-  spitter:{ hp: 55,  speed: 0.9,  r: 13, dmg: 12, points: 30, color: "#9b6bd6", dark: "#4b2f6b", touch: 700, ranged: true }
+  spitter:{ hp: 55,  speed: 0.9,  r: 13, dmg: 12, points: 30, color: "#9b6bd6", dark: "#4b2f6b", touch: 700, ranged: true },
+  // charges the player, telegraphs, then detonates -- hurts nearby zombies too
+  exploder:{hp: 46,  speed: 1.25, r: 15, dmg: 0,  points: 40, color: "#c2703a", dark: "#5e2f16", touch: 900,
+            fuse: 620, radius: 108, blast: 68 },
+  // very slow, enormous, shoves the player away on contact
+  tank:   { hp: 620, speed: 0.40, r: 27, dmg: 30, points: 160, color: "#5a5f4a", dark: "#262a1e", touch: 950, shove: 13 },
+  // hangs back and calls reinforcements after a clear warning
+  screamer:{hp: 70,  speed: 0.72, r: 14, dmg: 8,  points: 70, color: "#b56ab5", dark: "#4d2450", touch: 800,
+            keep: 210, callEvery: 6800, warn: 1300, callN: 3 },
+  // armoured to the front; its guard turns slowly so you can flank it
+  shieldz:{ hp: 95,  speed: 0.68, r: 15, dmg: 14, points: 55, color: "#7a8090", dark: "#2f343d", touch: 760,
+            guardArc: 1.25, guardCut: 0.12, turn: 0.020 }
 };
 
 class Zombie {
@@ -1991,8 +2328,30 @@ class Zombie {
     this.nextSpit = game.time + rand(1500, 3500);
     this.wobble = rand(0.7, 1.3);
     this.variant = randInt(0, 2);   // picks clothing / unit within a world set
+    this.fuse = 0;                  // exploder: >0 once primed
+    this.primed = false;
+    this.guard = rand(0, TAU);      // shieldz: facing of the shield, lags the body
+    this.nextCall = game.time + rand(2200, 4200);   // screamer
+    this.warnUntil = 0;
   }
   hurt(n, kx, ky) {
+    // a shield zombie soaks hits that land on its guard; flank it instead
+    if (this.type === "shieldz" && (kx || ky)) {
+      const m = Math.hypot(kx, ky) || 1;
+      // the shot travels roughly opposite the guard when it hits the front
+      const dot = (kx / m) * Math.cos(this.guard) + (ky / m) * Math.sin(this.guard);
+      if (dot < -Math.cos(this.t.guardArc / 2)) {
+        n *= this.t.guardCut;
+        this.flash = 60;
+        for (let i = 0; i < 3; i++) {
+          const a = this.guard + rand(-0.5, 0.5);
+          particles.push(new Particle(this.x + Math.cos(this.guard) * this.r,
+            this.y + Math.sin(this.guard) * this.r,
+            Math.cos(a) * rand(1, 3), Math.sin(a) * rand(1, 3), rand(1.2, 2.4), "#cfd6e0", 300));
+        }
+        blip("square", 250, 0.04, 0.035, 160);
+      }
+    }
     this.hp -= n;
     this.flash = 120;
     this.kx += kx / this.mass; this.ky += ky / this.mass;
@@ -2005,6 +2364,7 @@ class Zombie {
   }
   die() {
     this.dead = true;
+    if (this.type === "exploder") this.detonate();
     game.kills++;
     game.combo++;
     game.comboTimer = 2200;
@@ -2033,10 +2393,61 @@ class Zombie {
     else if (roll < 0.355) pickups.push(new Pickup(this.x, this.y, "shield"));
     else if (roll < 0.375) pickups.push(new Pickup(this.x, this.y, "blast"));
   }
+  detonate() {
+    if (this._boomed) return;          // never twice, however it died
+    this._boomed = true;
+    const t = this.t;
+    explode(this.x, this.y, t.radius, t.blast, 12, "#ff9a3c", false);
+    SFX.boom();
+  }
+
+  /* Per-type behaviour. Returns true when the type has fully handled its own
+     movement this frame, so the shared chase below is skipped. */
+  special(dt, d, mvx, mvy) {
+    const t = this.t;
+    if (this.type === "exploder") {
+      // prime inside range, telegraph, then blow up -- always dodgeable
+      if (!this.primed && d < t.radius * 0.42) { this.primed = true; this.fuse = t.fuse; SFX.throw(); }
+      if (this.primed) {
+        this.fuse -= 16.6 * dt;
+        if (this.fuse <= 0 && !this.dead) { this.dead = true; this.detonate(); }
+      }
+    } else if (this.type === "screamer") {
+      // keeps its distance and calls the horde after a visible warning
+      if (game.time > this.nextCall && !this.warnUntil) {
+        this.warnUntil = game.time + t.warn;
+        blip("sawtooth", 180, 0.5, 0.05, 520);
+      }
+      if (this.warnUntil && game.time > this.warnUntil) {
+        this.warnUntil = 0;
+        this.nextCall = game.time + t.callEvery + rand(0, 1500);
+        const alive = zombies.filter(z => !z.dead && !z.isBoss).length;
+        if (alive < SPAWN_LIMITS.hordeCap) {
+          for (let i = 0; i < t.callN; i++) {
+            const a = rand(0, TAU), dd = this.r + rand(26, 62);
+            zombies.push(new Zombie(Math.random() < 0.5 ? "walker" : "runner",
+              clamp(this.x + Math.cos(a) * dd, 20, W - 20),
+              clamp(this.y + Math.sin(a) * dd, 20, H - 20), this.spawnBuff || 1));
+          }
+        }
+        SFX.scream();
+        game.shake = Math.min(14, game.shake + 5);
+      }
+    } else if (this.type === "shieldz") {
+      // the guard lags the body, which is what makes flanking work
+      let da = this.angle - this.guard;
+      while (da > Math.PI) da -= TAU;
+      while (da < -Math.PI) da += TAU;
+      this.guard += clamp(da, -t.turn * dt, t.turn * dt);
+    }
+    return false;
+  }
+
   update(dt) {
     const dx = player.x - this.x, dy = player.y - this.y;
     const d = Math.hypot(dx, dy) || 1;
     this.angle = Math.atan2(dy, dx);
+    this.special(dt, d);
 
     let mvx = dx / d, mvy = dy / d;
     // slight weave so the horde doesn't stack in a perfect line
@@ -2045,8 +2456,8 @@ class Zombie {
     const nx = -mvy, ny = mvx;
     mvx += nx * perp; mvy += ny * perp;
 
-    const keepDist = this.t.ranged ? 190 : 0;
-    if (this.t.ranged && d < keepDist) { mvx *= -0.7; mvy *= -0.7; }
+    const keepDist = this.t.ranged ? 190 : (this.t.keep || 0);
+    if (keepDist && d < keepDist) { mvx *= -0.7; mvy *= -0.7; }
 
     this.vx += mvx * this.speed * 0.22 * dt;
     this.vy += mvy * this.speed * 0.22 * dt;
@@ -2077,10 +2488,18 @@ class Zombie {
     }
 
     // melee
-    if (d < this.r + player.r && game.time - this.lastTouch > this.t.touch) {
+    // types with no melee (the exploder) must not touch the player at all --
+    // a 0-damage hit still granted invulnerability frames, which then
+    // absorbed the exploder's own blast a moment later
+    if (this.t.dmg > 0 && d < this.r + player.r && game.time - this.lastTouch > this.t.touch) {
       this.lastTouch = game.time;
-      player.damage(this.t.dmg);
+      player.damage(Math.round(this.t.dmg * (this.dmgScale || 1)));
       this.kx -= mvx * 3; this.ky -= mvy * 3;
+      if (this.t.shove) {                 // tank knocks the player backwards
+        player.x = clamp(player.x + (dx / d) * this.t.shove, player.r, W - player.r);
+        player.y = clamp(player.y + (dy / d) * this.t.shove, player.r, H - player.r);
+        game.shake = Math.min(20, game.shake + 9);
+      }
     }
   }
   draw(g) {
@@ -2103,8 +2522,12 @@ class Zombie {
 
     const set = zombieSkinSet();
     const skin = set && set[this.type];
+    const pal = (set && SET_PAL[game.theme && game.theme.zombieSet]) || DEFAULT_PAL;
     if (skin) {
       skin.call(set, g, this, this.r, lurch, flash);
+    } else if (TYPE_SHAPES[this.type]) {
+      // shared silhouette, this world's colours
+      TYPE_SHAPES[this.type](g, this, this.r, lurch, flash, pal);
     } else {
       // endless, or any type a set does not skin, keeps the original look
       g.strokeStyle = t.dark; g.lineWidth = this.r * 0.42; g.lineCap = "round";
@@ -2515,6 +2938,7 @@ const game = {
   eventMod: null, dark: 0, diff: 1, theme: null,
   boss: null, eventBanner: null, eventBannerTime: 0,
   bossPending: null, bossWarnTime: 0, introWorld: null,
+  newEnemy: null, newEnemyTime: 0,
   time: 0,
   score: 0, kills: 0,
   shotsFired: 0, shotsHit: 0, headshots: 0, maxCombo: 0,
@@ -2635,6 +3059,8 @@ const game = {
     invalidatePropLayer();
     seedAtmos();
     this.reset();
+    for (const k in seenEnemies) delete seenEnemies[k];
+    this.newEnemy = null; this.newEnemyTime = 0;
     this.plan = buildWavePlan(world, stageNo - 1);
     this.planIdx = 0;
     this.waveActive = false;
@@ -2703,21 +3129,24 @@ const game = {
 
   spawnOne() {
     const w = this.wave;
+    if (zombies.length >= SPAWN_LIMITS.hordeCap) return;   // never flood the field
     let type, buff;
     if (this.mode === "campaign") {
-      const spec = this.plan[this.planIdx];
       const e = this.eventMod;
-      const bag = (e && e.types) ? e.types : spec.bag;
-      type = pick(bag);
-      buff = this.diff * (1 + (w - 1) * 0.06) * (e ? e.hpMul : 1);
+      // a special event overrides the table for its wave, but still obeys caps
+      if (e && e.types) {
+        const allowed = e.types.filter(t => {
+          const cap = SPAWN_LIMITS.perType[t];
+          return cap === undefined || aliveOf(t) < cap;
+        });
+        type = allowed.length ? pick(allowed) : pick(e.types);
+      } else {
+        type = pickEnemyType(this.cw, this.cs, this.planIdx + 1, this.plan.length);
+      }
+      const sc = WORLD_SCALE[this.cw] || WORLD_SCALE[1];
+      buff = sc.hp * (1 + (w - 1) * 0.05) * (e ? e.hpMul : 1);
     } else {
-      const bag = ["walker", "walker", "walker"];
-      if (w >= 2) bag.push("runner");
-      if (w >= 4) bag.push("runner", "runner");
-      if (w >= 5) bag.push("brute");
-      if (w >= 7) bag.push("spitter");
-      if (w >= 9) bag.push("brute", "spitter", "runner");
-      type = pick(bag);
+      type = pickEndlessType(w);
       buff = 1 + (w - 1) * 0.10;
     }
 
@@ -2729,6 +3158,13 @@ const game = {
     else if (side === 2) { x = rand(0, W); y = H + pad; }
     else { x = -pad; y = rand(0, H); }
     const z = new Zombie(type, x, y, buff);
+    if (this.mode === "campaign") {
+      const sc = WORLD_SCALE[this.cw] || WORLD_SCALE[1];
+      z.speed *= sc.speed;
+      z.dmgScale = sc.dmg;
+      z.spawnBuff = buff;              // screamer calls inherit the world's tuning
+      noteFirstSighting(type);
+    }
     if (this.eventMod && this.eventMod.speedMul) z.speed *= this.eventMod.speedMul;
     zombies.push(z);
   },
@@ -3210,6 +3646,7 @@ function update(dt) {
   game.dark += (wantDark - game.dark) * Math.min(1, 0.05 * dt);
   if (game.eventBannerTime > 0) game.eventBannerTime -= 16.6 * dt;
   updateAtmos(dt);
+  if (game.newEnemyTime > 0) game.newEnemyTime -= 16.6 * dt;
   if (game.bossWarnTime > 0) {
     game.bossWarnTime -= 16.6 * dt;
     if (game.bossWarnTime <= 0 && game.bossPending) {
@@ -3611,6 +4048,20 @@ function drawHUD(g) {
     g.fillStyle = "#cfd6c9";
     g.font = "bold 15px 'Courier New', monospace";
     g.fillText("BOSS INCOMING", W / 2, H / 2 + 34);
+    g.restore();
+  }
+
+  // first sighting of an enemy type
+  if (game.newEnemyTime > 0 && game.newEnemy) {
+    const a = clamp(game.newEnemyTime / 600, 0, 1);
+    g.save();
+    g.globalAlpha = a; g.textAlign = "center";
+    g.fillStyle = "#b3121b";
+    g.font = "bold 11px 'Courier New', monospace";
+    g.fillText("NEW THREAT", W / 2, H * 0.20);
+    g.fillStyle = "#ffd76a";
+    g.font = "bold 24px 'Courier New', monospace";
+    g.fillText(game.newEnemy, W / 2, H * 0.20 + 26);
     g.restore();
   }
 

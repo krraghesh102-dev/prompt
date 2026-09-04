@@ -123,12 +123,30 @@ Zombies spawn off-screen and close in from every edge. Clear the wave, get a
 short breather plus a bonus, then the next wave starts — bigger, faster, tougher.
 Each wave scales enemy count, health, and speed, and mixes in nastier types.
 
-**Enemies**
+**Enemies** — ten types, introduced gradually across the campaign.
 
-- **Walker** — slow, common, 10 pts
-- **Runner** — fast and fragile, from wave 2, 18 pts
-- **Brute** — heavy, high HP, big damage, from wave 5, 45 pts
-- **Spitter** — keeps its distance and lobs acid, from wave 7, 30 pts
+| Enemy | Threat | First appears |
+|---|---|---|
+| Walker | slow, common | W1 S1 |
+| Runner | fast, fragile | W1 S2 |
+| Brute | heavy, high HP | W1 S4 |
+| Spitter | ranged, lobs acid | W2 S3 |
+| Crawler | low, very fast, small target | W2 S4 |
+| Exploder | charges, telegraphs, detonates — hurts zombies too | W3 S3 |
+| Stalker | near-invisible until it closes | W3 S4 |
+| Screamer | hangs back, calls reinforcements after a warning | W4 S2 |
+| Shield zombie | armoured to the front; flank it | W4 S3 |
+| Tank | enormous, slow, shoves you backwards | W5 S3 |
+
+Nothing outside a stage's table can spawn, so World 1 cannot produce a tank
+no matter how the dice fall. Within a stage, early waves lean on basics and
+specials ramp up toward the last wave. Concurrency limits cap how many of
+each specialist can be alive at once (1 tank, 1 screamer, 3 exploders, 6
+specials total, 46 enemies overall), so a bad roll can never stack four
+tanks or an endless screamer chain.
+
+Endless keeps a **separate** ladder that unlocks types by wave number, so it
+still starts simple and reaches the full roster around wave 21.
 
 **Armory** — three guns, plus three limited-charge items.
 
