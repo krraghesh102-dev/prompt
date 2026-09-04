@@ -110,6 +110,11 @@
   .stageRow.locked .snm { color: #6d7566; }
   .stageRow .ss { font-size: 15px; letter-spacing: 2px; color: #ffd76a; min-width: 58px; text-align: right; }
   .stageRow .boss { font-size: 10px; color: #ff6b6b; letter-spacing: 2px; }
+  .introCanvas { width: 100%; max-width: 420px; height: auto; border: 2px solid #34402a;
+                 display: block; margin: 0 auto 16px; }
+  .previewWrap { position: relative; margin: -14px -16px 8px; }
+  .previewWrap canvas { width: 100%; height: 62px; display: block; }
+  .card.locked .previewWrap canvas { filter: grayscale(.7) brightness(.5); }
   .stack { display: flex; flex-direction: column; gap: 9px; width: 100%; }
 
   .results { display: grid; grid-template-columns: 1fr auto; gap: 5px 18px; font-size: 13px;
@@ -183,6 +188,16 @@
     <div class="sub" id="worldsSub">CAMPAIGN</div>
     <div class="grid" id="worldGrid"></div>
     <div class="backRow"><button class="ghost" id="worldsBack">MAIN MENU</button></div>
+  </div>
+</div>
+
+<div id="worldintro" class="overlay hidden">
+  <div class="panel">
+    <div class="sub" id="wiNum">WORLD 01</div>
+    <h1 id="wiName">THE OUTBREAK</h1>
+    <canvas id="wiCanvas" width="420" height="150" class="introCanvas"></canvas>
+    <div class="sub" id="wiText"></div>
+    <button id="wiGo">CONTINUE</button>
   </div>
 </div>
 
@@ -290,6 +305,7 @@ function resize() {
   W = want < 760 ? 760 : want > 1600 ? 1600 : want;   // inline clamp: runs before utils init
   canvas.width = W; canvas.height = H;
   scale = Math.min(sw / W, sh / H);
+  if (typeof invalidatePropLayer === "function") invalidatePropLayer();
   canvas.style.width = (W * scale) + "px";
   canvas.style.height = (H * scale) + "px";
   // keep everything inside the new bounds
@@ -530,7 +546,6 @@ const EVENTS = {
    enemies are introduced across that stage's waves. */
 const WORLDS = [
   { id: 1, name: "THE OUTBREAK", desc: "THE INFECTION HAS BEGUN.", diff: 1.00,
-    theme: { ground: "#171c14", grid: "rgba(255,255,255,.028)", edge: "rgba(125,213,63,.16)", tint: null },
     boss: { name: "THE BUTCHER", hp: 950, scale: 1.00 },
     stages: [
       { name: "FIRST BLOOD", waves: 5,  pool: ["walker", "runner"],          events: { 5: "BLOOD_RUSH" } },
@@ -541,58 +556,53 @@ const WORLDS = [
         events: { 5: "BLOOD_RUSH" } }
     ] },
   { id: 2, name: "DEAD CITY", desc: "THE STREETS BELONG TO THEM.", diff: 1.25,
-    theme: { ground: "#141518", grid: "rgba(255,255,255,.035)", edge: "rgba(140,160,190,.20)", tint: "rgba(60,70,90,.10)" },
-    boss: { name: "THE COLOSSUS", hp: 1250, scale: 1.06 },
+    boss: { name: "THE CRUSHER", hp: 1250, scale: 1.06 },
     stages: [
       { name: "COLD STREETS",  waves: 5,  pool: ["walker", "runner"],                     events: { 5: "ZOMBIE_FRENZY" } },
       { name: "ROOFTOP RUN",   waves: 5,  pool: ["runner", "walker", "brute"],            events: { 5: "BLOOD_RUSH" } },
       { name: "SUBWAY",        waves: 5,  pool: ["walker", "brute", "runner"],            events: { 5: "BRUTE_INVASION" } },
       { name: "TOXIC ALLEY",   waves: 5,  pool: ["walker", "runner", "spitter"],          events: { 5: "INFECTION" } },
-      { name: "THE COLOSSUS",  waves: 10, pool: ["walker", "runner", "brute", "spitter"], boss: true,
+      { name: "THE CRUSHER",   waves: 10, pool: ["walker", "runner", "brute", "spitter"], boss: true,
         events: { 5: "BRUTE_INVASION" } }
     ] },
   { id: 3, name: "NIGHTFALL", desc: "YOU CANNOT SEE THEM COMING.", diff: 1.50,
-    theme: { ground: "#0c0f12", grid: "rgba(255,255,255,.022)", edge: "rgba(90,140,200,.20)", tint: "rgba(10,20,45,.28)", dark: true },
-    boss: { name: "THE REAPER", hp: 1500, scale: 1.10 },
+    boss: { name: "THE NIGHT HUNTER", hp: 1500, scale: 1.10 },
     stages: [
-      { name: "LAST LIGHT",   waves: 5,  pool: ["walker", "runner"],                     events: { 5: "BLACKOUT" } },
-      { name: "BLIND SPOT",   waves: 5,  pool: ["runner", "spitter"],                    events: { 5: "BLACKOUT" } },
-      { name: "COLD SWEAT",   waves: 5,  pool: ["walker", "brute", "runner"],            events: { 5: "ZOMBIE_FRENZY" } },
-      { name: "NO DAWN",      waves: 5,  pool: ["runner", "spitter", "brute"],           events: { 5: "INFECTION" } },
-      { name: "THE REAPER",   waves: 10, pool: ["walker", "runner", "brute", "spitter"], boss: true,
+      { name: "LAST LIGHT",   waves: 5,  pool: ["walker", "stalker"],                    events: { 5: "BLACKOUT" } },
+      { name: "BLIND SPOT",   waves: 5,  pool: ["stalker", "crawler"],                   events: { 5: "BLACKOUT" } },
+      { name: "COLD SWEAT",   waves: 5,  pool: ["walker", "crawler", "brute"],           events: { 5: "ZOMBIE_FRENZY" } },
+      { name: "NO DAWN",      waves: 5,  pool: ["stalker", "spitter", "brute"],          events: { 5: "INFECTION" } },
+      { name: "THE NIGHT HUNTER", waves: 10, pool: ["walker", "stalker", "crawler", "brute"], boss: true,
         events: { 5: "BLACKOUT" } }
     ] },
   { id: 4, name: "INFECTED FACTORY", desc: "SOMETHING IS BEING MADE HERE.", diff: 1.80,
-    theme: { ground: "#1a1712", grid: "rgba(255,180,80,.045)", edge: "rgba(255,150,60,.22)", tint: "rgba(80,45,10,.14)" },
-    boss: { name: "THE FOREMAN", hp: 1850, scale: 1.14 },
+    boss: { name: "THE ABOMINATION", hp: 1850, scale: 1.14 },
     stages: [
       { name: "LOADING BAY",  waves: 5,  pool: ["walker", "brute"],                      events: { 5: "BRUTE_INVASION" } },
       { name: "THE LINE",     waves: 5,  pool: ["runner", "brute"],                      events: { 5: "ZOMBIE_FRENZY" } },
       { name: "VAT ROOM",     waves: 5,  pool: ["spitter", "walker", "brute"],           events: { 5: "INFECTION" } },
       { name: "MELTDOWN",     waves: 5,  pool: ["runner", "brute", "spitter"],           events: { 5: "BLOOD_RUSH" } },
-      { name: "THE FOREMAN",  waves: 10, pool: ["walker", "runner", "brute", "spitter"], boss: true,
+      { name: "THE ABOMINATION", waves: 10, pool: ["walker", "runner", "brute", "spitter"], boss: true,
         events: { 5: "BRUTE_INVASION" } }
     ] },
   { id: 5, name: "THE QUARANTINE", desc: "THE CURE WAS NEVER COMING.", diff: 2.10,
-    theme: { ground: "#12181a", grid: "rgba(180,255,240,.035)", edge: "rgba(120,220,220,.22)", tint: "rgba(20,60,60,.12)" },
     boss: { name: "PATIENT ZERO", hp: 2200, scale: 1.18 },
     stages: [
       { name: "TRIAGE",       waves: 5,  pool: ["walker", "spitter"],                    events: { 5: "INFECTION" } },
-      { name: "WARD 9",       waves: 5,  pool: ["runner", "spitter"],                    events: { 5: "BLACKOUT" } },
+      { name: "WARD 9",       waves: 5,  pool: ["runner", "crawler", "spitter"],         events: { 5: "BLACKOUT" } },
       { name: "COLD STORAGE", waves: 5,  pool: ["brute", "walker", "spitter"],           events: { 5: "BRUTE_INVASION" } },
       { name: "LOCKDOWN",     waves: 5,  pool: ["runner", "brute", "spitter"],           events: { 5: "ZOMBIE_FRENZY" } },
       { name: "PATIENT ZERO", waves: 10, pool: ["walker", "runner", "brute", "spitter"], boss: true,
         events: { 5: "INFECTION" } }
     ] },
   { id: 6, name: "THE WASTELANDS", desc: "NOTHING LEFT TO CONTAIN.", diff: 2.50,
-    theme: { ground: "#191510", grid: "rgba(255,220,150,.035)", edge: "rgba(200,120,60,.24)", tint: "rgba(70,45,20,.16)" },
-    boss: { name: "THE WARLORD", hp: 2600, scale: 1.22 },
+    boss: { name: "THE COLOSSUS", hp: 2600, scale: 1.22 },
     stages: [
       { name: "OPEN GROUND",  waves: 5,  pool: ["runner", "walker", "brute"],            events: { 5: "BLOOD_RUSH" } },
       { name: "DUST STORM",   waves: 5,  pool: ["walker", "spitter", "brute"],           events: { 5: "BLACKOUT" } },
       { name: "THE PIT",      waves: 5,  pool: ["brute", "runner"],                      events: { 5: "BRUTE_INVASION" } },
       { name: "LAST STAND",   waves: 5,  pool: ["runner", "brute", "spitter"],           events: { 5: "ZOMBIE_FRENZY" } },
-      { name: "THE WARLORD",  waves: 10, pool: ["walker", "runner", "brute", "spitter"], boss: true,
+      { name: "THE COLOSSUS",  waves: 10, pool: ["walker", "runner", "brute", "spitter"], boss: true,
         events: { 5: "INFECTION" } }
     ] }
 ];
@@ -617,7 +627,7 @@ const Progress = {
       w.stages.forEach((st, i) => {
         stages[i + 1] = { unlocked: UNLOCK_ALL || (w.id === 1 && i === 0), completed: false, stars: 0, best: 0 };
       });
-      worlds[w.id] = { unlocked: UNLOCK_ALL || w.id === 1, completed: false, stages };
+      worlds[w.id] = { unlocked: UNLOCK_ALL || w.id === 1, completed: false, introSeen: false, stages };
     }
     return { version: 1, worlds, highestWave: 0 };
   },
@@ -647,6 +657,7 @@ const Progress = {
       const bw = base.worlds[wid];
       bw.unlocked = !!sw.unlocked || bw.unlocked;
       bw.completed = !!sw.completed;
+      bw.introSeen = !!sw.introSeen;
       for (const sid in bw.stages) {
         const ss = sw.stages && sw.stages[sid];
         if (!ss) continue;
@@ -743,6 +754,403 @@ function buildWavePlan(world, stageIdx) {
   return plan;
 }
 
+
+/* ================= WORLD VISUAL THEMES =================
+   One entry per world drives ground, props, atmosphere, lighting, the
+   zombie art set and the boss art. Adding a world means adding an entry
+   plus (optionally) a prop drawer and a zombie set -- the renderer itself
+   never changes. */
+
+/* Deterministic RNG so a stage's prop layout is identical every time you
+   play it, but different from every other stage. */
+function seededRng(seed) {
+  let a = seed >>> 0;
+  return function () {
+    a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+
+const WORLD_THEMES = {
+  1: {
+    name: "THE OUTBREAK", env: "suburban", timeOfDay: "sunset", zombieSet: "outbreak", bossArt: "butcher",
+    ground: "#26211a", groundAlt: "#2c261d", grid: "rgba(255,210,150,.030)",
+    edge: "rgba(255,170,90,.22)", tint: "rgba(255,140,60,.045)",
+    sky: ["#3a2418", "#241a14"],
+    atmos: { kind: "dust", n: 30, color: "#d9b48f", size: [1, 2.4], drift: [0.22, -0.05], alpha: .30 },
+    light: { warm: "rgba(255,150,60,.055)", vignette: .30 },
+    stageEnv: ["RESIDENTIAL STREET", "BACKYARDS", "GAS STATION", "ABANDONED ROAD", "THE BUTCHER'S YARD"]
+  },
+  2: {
+    name: "DEAD CITY", env: "city", timeOfDay: "overcast", zombieSet: "urban", bossArt: "crusher",
+    ground: "#1b1d21", groundAlt: "#212429", grid: "rgba(200,215,235,.035)",
+    edge: "rgba(150,170,200,.22)", tint: "rgba(70,80,100,.10)",
+    sky: ["#2a2f36", "#1a1d22"],
+    atmos: { kind: "ash", n: 38, color: "#b9bec6", size: [1, 2.6], drift: [-0.14, 0.20], alpha: .34 },
+    light: { warm: "rgba(255,120,40,.035)", vignette: .38 },
+    stageEnv: ["CITY STREET", "PARKING LOT", "RUINED STOREFRONT", "URBAN INTERSECTION", "COLLAPSED PLAZA"]
+  },
+  3: {
+    name: "NIGHTFALL", env: "night", timeOfDay: "night", zombieSet: "night", bossArt: "nightHunter",
+    ground: "#0d1114", groundAlt: "#111619", grid: "rgba(150,190,230,.020)",
+    edge: "rgba(120,170,230,.20)", tint: "rgba(12,24,50,.26)", dark: true,
+    sky: ["#0a1020", "#05080f"],
+    atmos: { kind: "fog", n: 13, color: "#8fa8c4", size: [46, 96], drift: [0.10, 0.02], alpha: .045 },
+    light: { moon: "rgba(120,165,235,.055)", vignette: .50 },
+    stageEnv: ["DARK STREET", "THE CEMETERY", "DEAD GROVE", "LAMPLIGHT ROW", "THE HUNTING GROUND"]
+  },
+  4: {
+    name: "INFECTED FACTORY", env: "factory", timeOfDay: "interior", zombieSet: "industrial", bossArt: "abomination",
+    ground: "#22201c", groundAlt: "#2a2723", grid: "rgba(255,190,110,.045)",
+    edge: "rgba(255,160,60,.26)", tint: "rgba(90,60,20,.10)",
+    sky: ["#2b2721", "#1d1a16"],
+    atmos: { kind: "steam", n: 14, color: "#cfd6c9", size: [12, 30], drift: [0.05, -0.30], alpha: .055 },
+    light: { warm: "rgba(255,170,60,.05)", vignette: .38, flicker: true },
+    stageEnv: ["LOADING BAY", "ASSEMBLY LINE", "VAT ROOM", "REACTOR FLOOR", "THE FOUNDRY"]
+  },
+  5: {
+    name: "THE QUARANTINE", env: "lab", timeOfDay: "emergency", zombieSet: "experimental", bossArt: "patientZero",
+    ground: "#1a2124", groundAlt: "#1f272a", grid: "rgba(190,255,245,.040)",
+    edge: "rgba(120,230,225,.24)", tint: "rgba(20,70,70,.10)",
+    sky: ["#182226", "#10171a"],
+    atmos: { kind: "bio", n: 30, color: "#7ef0d0", size: [1.2, 3], drift: [0.06, -0.14], alpha: .34 },
+    light: { emergency: "rgba(255,50,50,.055)", vignette: .40, flicker: true },
+    stageEnv: ["TRIAGE WARD", "ISOLATION WING", "COLD STORAGE", "THE LABS", "CONTAINMENT CORE"]
+  },
+  6: {
+    name: "THE WASTELANDS", env: "waste", timeOfDay: "harsh", zombieSet: "evolved", bossArt: "colossus",
+    ground: "#3a3020", groundAlt: "#443a26", grid: "rgba(255,225,160,.030)",
+    edge: "rgba(220,150,70,.26)", tint: "rgba(150,110,50,.10)",
+    sky: ["#6b5533", "#43351f"],
+    atmos: { kind: "sand", n: 46, color: "#e0c68c", size: [1, 3], drift: [0.85, 0.10], alpha: .30 },
+    light: { warm: "rgba(255,200,110,.06)", vignette: .26 },
+    stageEnv: ["OPEN GROUND", "DUST BASIN", "THE PIT", "MILITARY LINE", "THE LAST FIELD"]
+  }
+};
+
+/* ---- static prop drawers ----
+   Each paints one environment onto the offscreen prop layer. They run once
+   per stage, not per frame, so they can afford detail. `v` is the stage
+   index (0-4) and shifts what appears, so stages inside a world differ. */
+const PROPS = {
+  suburban(g, r, W, H, v) {
+    // road across the middle, houses along the top, yards below
+    const roadY = H * (0.44 + r() * 0.06), roadH = H * 0.22;
+    g.fillStyle = "#1e1b17"; g.fillRect(0, roadY, W, roadH);
+    g.fillStyle = "rgba(255,255,255,.16)";
+    for (let x = 10; x < W; x += 64) g.fillRect(x, roadY + roadH / 2 - 2, 30, 4);
+    g.strokeStyle = "rgba(255,255,255,.10)"; g.lineWidth = 2;
+    g.beginPath(); g.moveTo(0, roadY + 3); g.lineTo(W, roadY + 3);
+    g.moveTo(0, roadY + roadH - 3); g.lineTo(W, roadY + roadH - 3); g.stroke();
+
+    // houses
+    const houses = 3 + Math.floor(r() * 2) + (v === 1 ? 1 : 0);
+    for (let i = 0; i < houses; i++) {
+      const hw = 90 + r() * 70, hh = 62 + r() * 26;
+      const hx = (i + 0.15) * (W / houses) + r() * 24, hy = roadY - hh - 26 - r() * 18;
+      g.fillStyle = ["#3b322a", "#43372c", "#352c26"][Math.floor(r() * 3)];
+      g.fillRect(hx, hy, hw, hh);
+      g.fillStyle = "#2a221c";                                  // roof
+      g.beginPath(); g.moveTo(hx - 8, hy); g.lineTo(hx + hw / 2, hy - 24); g.lineTo(hx + hw + 8, hy); g.closePath(); g.fill();
+      for (let wdw = 0; wdw < 3; wdw++) {                        // windows, some broken
+        const wx = hx + 12 + wdw * (hw - 24) / 3, wy = hy + 16;
+        g.fillStyle = r() < 0.45 ? "#12100d" : "rgba(255,170,80,.30)";
+        g.fillRect(wx, wy, 18, 16);
+        g.strokeStyle = "#241d18"; g.lineWidth = 2; g.strokeRect(wx, wy, 18, 16);
+      }
+      g.fillStyle = "#241d18"; g.fillRect(hx + hw / 2 - 9, hy + hh - 26, 18, 26);
+    }
+    // fences along the bottom yards
+    g.strokeStyle = "#4a3f31"; g.lineWidth = 3;
+    const fy = roadY + roadH + 26 + r() * 20;
+    for (let x = 10; x < W - 10; x += 16) {
+      if (r() < 0.16) continue;                                  // broken sections
+      g.beginPath(); g.moveTo(x, fy); g.lineTo(x, fy + 22); g.stroke();
+    }
+    g.beginPath(); g.moveTo(0, fy + 7); g.lineTo(W, fy + 7); g.stroke();
+
+    // cars on the road
+    const cars = 2 + Math.floor(r() * 2);
+    for (let i = 0; i < cars; i++) {
+      const cx = 60 + r() * (W - 140), cy = roadY + 16 + r() * (roadH - 46);
+      drawCar(g, cx, cy, r() * 0.5 - 0.25, ["#5a3b3b", "#3b4a5a", "#4a4a3b"][Math.floor(r() * 3)], r() < 0.4);
+    }
+    // bins, bushes, debris
+    for (let i = 0; i < 12 + v * 2; i++) {
+      const x = r() * W, y = r() * H;
+      if (y > roadY - 10 && y < roadY + roadH + 10) continue;
+      if (r() < 0.4) { g.fillStyle = "#2f3d28"; g.beginPath(); g.arc(x, y, 7 + r() * 9, 0, TAU); g.fill(); }
+      else { g.fillStyle = "#3a3128"; g.fillRect(x, y, 8 + r() * 10, 6 + r() * 8); }
+    }
+    if (v === 2) {                                              // gas station stage
+      g.fillStyle = "#3a3630"; g.fillRect(W * 0.62, H * 0.06, 150, 14);
+      g.fillRect(W * 0.66, H * 0.06, 10, 60); g.fillRect(W * 0.73, H * 0.06, 10, 60);
+      g.fillStyle = "#8a2b2b"; g.fillRect(W * 0.68, H * 0.13, 26, 34);
+    }
+  },
+
+  city(g, r, W, H, v) {
+    // skyline band along the top
+    let x = 0;
+    while (x < W) {
+      const bw = 40 + r() * 70, bh = 60 + r() * 120;
+      g.fillStyle = ["#15181c", "#1a1e23", "#101317"][Math.floor(r() * 3)];
+      g.fillRect(x, 0, bw, bh);
+      g.fillStyle = "rgba(255,200,120,.13)";
+      for (let wy = 10; wy < bh - 10; wy += 16)
+        for (let wx = 6; wx < bw - 8; wx += 14) if (r() < 0.30) g.fillRect(x + wx, wy, 6, 8);
+      x += bw + 4 + r() * 10;
+    }
+    // asphalt with lane markings
+    g.fillStyle = "#24272b"; g.fillRect(0, H * 0.38, W, H * 0.62);
+    g.strokeStyle = "rgba(230,220,120,.16)"; g.lineWidth = 3;
+    for (let lx = 20; lx < W; lx += 78) { g.beginPath(); g.moveTo(lx, H * 0.72); g.lineTo(lx + 40, H * 0.72); g.stroke(); }
+    // burned-out cars and barricades
+    for (let i = 0; i < 4 + v; i++) {
+      drawCar(g, 50 + r() * (W - 130), H * 0.42 + r() * H * 0.5, r() * 1.2 - 0.6, "#2c2724", true);
+    }
+    for (let i = 0; i < 4 + v; i++) {
+      const bx = r() * (W - 60), by = H * 0.42 + r() * H * 0.5;
+      g.save(); g.translate(bx, by); g.rotate(r() * 0.5 - 0.25);
+      g.fillStyle = "#6b5a2a"; g.fillRect(-26, -6, 52, 12);
+      g.fillStyle = "#1c1a17";
+      for (let sx = -26; sx < 26; sx += 13) g.fillRect(sx, -6, 6, 12);
+      g.restore();
+    }
+    // traffic light + rubble
+    g.fillStyle = "#232629"; g.fillRect(W * 0.5 - 4, H * 0.30, 8, 70);
+    g.fillRect(W * 0.5 - 4, H * 0.30, 46, 8);
+    g.fillStyle = "#141618"; g.fillRect(W * 0.5 + 30, H * 0.28, 16, 38);
+    g.fillStyle = "#8a2b2b"; g.beginPath(); g.arc(W * 0.5 + 38, H * 0.32, 4, 0, TAU); g.fill();
+    for (let i = 0; i < 26; i++) {
+      g.fillStyle = ["#2e3236", "#26292d", "#33373b"][Math.floor(r() * 3)];
+      const rx = r() * W, ry = H * 0.38 + r() * H * 0.6;
+      g.fillRect(rx, ry, 4 + r() * 12, 3 + r() * 8);
+    }
+  },
+
+  night(g, r, W, H, v) {
+    // gravestones, dead trees and lamp pools
+    for (let i = 0; i < 40; i++) {
+      g.fillStyle = "rgba(30,40,48,.5)";
+      g.beginPath(); g.ellipse(r() * W, r() * H, 18 + r() * 40, 8 + r() * 16, 0, 0, TAU); g.fill();
+    }
+    const stones = v === 1 ? 18 : 9;
+    for (let i = 0; i < stones; i++) {
+      const sx = 30 + r() * (W - 60), sy = 40 + r() * (H - 80);
+      g.save(); g.translate(sx, sy); g.rotate((r() - 0.5) * 0.25);
+      g.fillStyle = "#2c333a";
+      g.beginPath(); g.moveTo(-11, 16); g.lineTo(-11, -8); g.arc(0, -8, 11, Math.PI, 0); g.lineTo(11, 16); g.closePath(); g.fill();
+      g.fillStyle = "rgba(140,170,200,.10)"; g.fillRect(-6, -6, 12, 3);
+      g.restore();
+    }
+    for (let i = 0; i < 5 + (v === 2 ? 5 : 0); i++) {
+      const tx = r() * W, ty = r() * H;
+      g.strokeStyle = "#1b2126"; g.lineWidth = 5; g.lineCap = "round";
+      g.beginPath(); g.moveTo(tx, ty + 26); g.lineTo(tx, ty - 14); g.stroke();
+      g.lineWidth = 3;
+      for (let br = 0; br < 4; br++) {
+        const a = -Math.PI / 2 + (r() - 0.5) * 2.2, L = 14 + r() * 18;
+        g.beginPath(); g.moveTo(tx, ty - 6 - r() * 10);
+        g.lineTo(tx + Math.cos(a) * L, ty - 10 + Math.sin(a) * L); g.stroke();
+      }
+    }
+    // street lamps cast a warm pool -- the only real light besides the player
+    const lamps = 3 + (v === 3 ? 3 : 0);
+    for (let i = 0; i < lamps; i++) {
+      const lx = (i + 0.5) * (W / lamps) + (r() - 0.5) * 40, ly = 40 + r() * (H - 120);
+      const grd = g.createRadialGradient(lx, ly, 4, lx, ly, 92);
+      grd.addColorStop(0, "rgba(255,220,150,.20)");
+      grd.addColorStop(1, "rgba(255,220,150,0)");
+      g.fillStyle = grd; g.beginPath(); g.arc(lx, ly, 92, 0, TAU); g.fill();
+      g.fillStyle = "#242a30"; g.fillRect(lx - 3, ly, 6, 46);
+      g.fillStyle = "#ffe6a8"; g.beginPath(); g.arc(lx, ly - 2, 5, 0, TAU); g.fill();
+    }
+  },
+
+  factory(g, r, W, H, v) {
+    // plated floor with rivets
+    g.fillStyle = "#26231f"; g.fillRect(0, 0, W, H);
+    g.strokeStyle = "rgba(0,0,0,.32)"; g.lineWidth = 2;
+    for (let x = 0; x < W; x += 96) { g.beginPath(); g.moveTo(x, 0); g.lineTo(x, H); g.stroke(); }
+    for (let y = 0; y < H; y += 96) { g.beginPath(); g.moveTo(0, y); g.lineTo(W, y); g.stroke(); }
+    g.fillStyle = "rgba(255,220,160,.07)";
+    for (let x = 12; x < W; x += 96) for (let y = 12; y < H; y += 96) { g.beginPath(); g.arc(x, y, 2.4, 0, TAU); g.fill(); }
+    // hazard stripes
+    g.save(); g.beginPath(); g.rect(0, H - 34, W, 22); g.clip();
+    for (let x = -30; x < W + 30; x += 30) {
+      g.fillStyle = (x / 30) % 2 ? "#c8a020" : "#1e1b17";
+      g.beginPath(); g.moveTo(x, H - 34); g.lineTo(x + 16, H - 34); g.lineTo(x - 6, H - 12); g.lineTo(x - 22, H - 12); g.closePath(); g.fill();
+    }
+    g.restore();
+    // conveyor belt
+    const cy = H * (0.28 + v * 0.09);
+    g.fillStyle = "#1c1a17"; g.fillRect(0, cy, W, 42);
+    g.fillStyle = "#33302a";
+    for (let x = 0; x < W; x += 26) g.fillRect(x, cy + 4, 16, 34);
+    g.fillStyle = "#45403a"; g.fillRect(0, cy - 5, W, 5); g.fillRect(0, cy + 42, W, 5);
+    // pipes along the top
+    for (let i = 0; i < 3; i++) {
+      const py = 14 + i * 15;
+      g.strokeStyle = ["#4a453d", "#3a3630", "#544d43"][i]; g.lineWidth = 9;
+      g.beginPath(); g.moveTo(0, py); g.lineTo(W, py); g.stroke();
+      g.fillStyle = "#2a2722";
+      for (let x = 40; x < W; x += 150) g.fillRect(x, py - 7, 8, 14);
+    }
+    // barrels, machinery, toxic pools
+    for (let i = 0; i < 8 + v; i++) {
+      const bx = 30 + r() * (W - 60), by = 70 + r() * (H - 140);
+      g.fillStyle = r() < 0.4 ? "#5a7a2a" : "#7a4a1e";
+      g.beginPath(); g.arc(bx, by, 11, 0, TAU); g.fill();
+      g.strokeStyle = "#231f1a"; g.lineWidth = 2; g.stroke();
+      g.strokeStyle = "rgba(0,0,0,.35)";
+      g.beginPath(); g.arc(bx, by, 6, 0, TAU); g.stroke();
+    }
+    for (let i = 0; i < 3 + v; i++) {
+      const px = r() * W, py = 60 + r() * (H - 120);
+      g.fillStyle = "rgba(120,200,60,.20)";
+      g.beginPath(); g.ellipse(px, py, 22 + r() * 26, 12 + r() * 14, r(), 0, TAU); g.fill();
+      g.fillStyle = "rgba(160,240,90,.14)";
+      g.beginPath(); g.ellipse(px, py, 12 + r() * 12, 6 + r() * 7, r(), 0, TAU); g.fill();
+    }
+    for (let i = 0; i < 3; i++) {
+      const mx = r() * (W - 90), my = 80 + r() * (H - 180);
+      g.fillStyle = "#33302a"; g.fillRect(mx, my, 60 + r() * 34, 40 + r() * 24);
+      g.fillStyle = "#1e1b17"; g.fillRect(mx + 8, my + 8, 20, 12);
+      g.fillStyle = "#c8a020"; g.fillRect(mx + 8, my + 26, 30, 4);
+    }
+  },
+
+  lab(g, r, W, H, v) {
+    // clinical tile floor
+    g.fillStyle = "#1e262a"; g.fillRect(0, 0, W, H);
+    g.strokeStyle = "rgba(190,255,250,.045)"; g.lineWidth = 1;
+    for (let x = 0; x < W; x += 44) { g.beginPath(); g.moveTo(x, 0); g.lineTo(x, H); g.stroke(); }
+    for (let y = 0; y < H; y += 44) { g.beginPath(); g.moveTo(0, y); g.lineTo(W, y); g.stroke(); }
+    // emergency light pools along the walls
+    for (let i = 0; i < 4; i++) {
+      const lx = (i + 0.5) * (W / 4), ly = i % 2 ? 12 : H - 12;
+      const grd = g.createRadialGradient(lx, ly, 4, lx, ly, 110);
+      grd.addColorStop(0, "rgba(255,40,40,.16)"); grd.addColorStop(1, "rgba(255,40,40,0)");
+      g.fillStyle = grd; g.beginPath(); g.arc(lx, ly, 110, 0, TAU); g.fill();
+    }
+    // hospital beds
+    for (let i = 0; i < 4 + v; i++) {
+      const bx = 40 + r() * (W - 120), by = 50 + r() * (H - 120);
+      g.save(); g.translate(bx, by); g.rotate((r() - 0.5) * 0.8);
+      g.fillStyle = "#2e3a3e"; g.fillRect(-26, -14, 52, 28);
+      g.fillStyle = "#5d6f74"; g.fillRect(-26, -14, 52, 7);
+      g.fillStyle = "#8fa3a8"; g.fillRect(-22, -6, 16, 18);
+      g.strokeStyle = "#465559"; g.lineWidth = 2; g.strokeRect(-26, -14, 52, 28);
+      g.restore();
+    }
+    // glass containment tubes
+    for (let i = 0; i < 3 + v; i++) {
+      const tx = 40 + r() * (W - 80), ty = 40 + r() * (H - 80);
+      g.fillStyle = "rgba(120,230,225,.10)";
+      g.beginPath(); g.ellipse(tx, ty, 15, 26, 0, 0, TAU); g.fill();
+      g.strokeStyle = "rgba(160,255,250,.30)"; g.lineWidth = 2; g.stroke();
+      g.fillStyle = "rgba(120,255,210,.16)";
+      g.beginPath(); g.ellipse(tx, ty + 8, 11, 15, 0, 0, TAU); g.fill();
+      g.fillStyle = "#2b3438"; g.fillRect(tx - 17, ty + 24, 34, 7);
+    }
+    // biohazard markings
+    for (let i = 0; i < 2 + v; i++) {
+      const hx = 60 + r() * (W - 120), hy = 60 + r() * (H - 120);
+      g.save(); g.translate(hx, hy); g.globalAlpha = .16;
+      g.strokeStyle = "#ffd76a"; g.lineWidth = 3;
+      g.beginPath(); g.arc(0, 0, 15, 0, TAU); g.stroke();
+      for (let k = 0; k < 3; k++) {
+        const a = k * TAU / 3 - Math.PI / 2;
+        g.beginPath(); g.arc(Math.cos(a) * 13, Math.sin(a) * 13, 8, 0, TAU); g.stroke();
+      }
+      g.restore();
+    }
+    // quarantine doors on the edges
+    g.fillStyle = "#2a3438"; g.fillRect(0, H / 2 - 42, 14, 84); g.fillRect(W - 14, H / 2 - 42, 14, 84);
+    g.fillStyle = "#c83c3c"; g.fillRect(0, H / 2 - 3, 14, 6); g.fillRect(W - 14, H / 2 - 3, 14, 6);
+  },
+
+  waste(g, r, W, H, v) {
+    // cracked sand with dune patches
+    g.fillStyle = "#3d331f"; g.fillRect(0, 0, W, H);
+    for (let i = 0; i < 22; i++) {
+      g.fillStyle = ["rgba(210,180,120,.10)", "rgba(120,95,55,.14)"][Math.floor(r() * 2)];
+      g.beginPath(); g.ellipse(r() * W, r() * H, 40 + r() * 90, 16 + r() * 34, r(), 0, TAU); g.fill();
+    }
+    g.strokeStyle = "rgba(0,0,0,.20)"; g.lineWidth = 1.5;
+    for (let i = 0; i < 24; i++) {
+      let cx = r() * W, cy = r() * H;
+      g.beginPath(); g.moveTo(cx, cy);
+      for (let k = 0; k < 4; k++) { cx += (r() - 0.5) * 50; cy += (r() - 0.5) * 34; g.lineTo(cx, cy); }
+      g.stroke();
+    }
+    // sandbag line + military crates
+    const by = H * (0.30 + v * 0.10);
+    for (let x = 20 + r() * 40; x < W - 40; x += 34) {
+      if (r() < 0.22) continue;
+      g.fillStyle = "#6b5c3a"; g.beginPath(); g.ellipse(x, by, 17, 10, 0, 0, TAU); g.fill();
+      g.fillStyle = "#5a4c2e"; g.beginPath(); g.ellipse(x + 8, by - 12, 17, 10, 0, 0, TAU); g.fill();
+      g.strokeStyle = "rgba(0,0,0,.25)"; g.lineWidth = 1; g.stroke();
+    }
+    for (let i = 0; i < 4 + v; i++) {
+      const cx = r() * (W - 40), cy = r() * (H - 40);
+      g.fillStyle = "#4a5238"; g.fillRect(cx, cy, 26, 20);
+      g.strokeStyle = "#2c3122"; g.lineWidth = 2; g.strokeRect(cx, cy, 26, 20);
+      g.fillStyle = "#8a9668"; g.fillRect(cx + 4, cy + 8, 18, 3);
+    }
+    // wrecks and rocks
+    for (let i = 0; i < 3 + v; i++) drawCar(g, 40 + r() * (W - 100), 40 + r() * (H - 90), r() * 2, "#4a4230", true);
+    for (let i = 0; i < 16; i++) {
+      const rx = r() * W, ry = r() * H, rr = 5 + r() * 16;
+      g.fillStyle = ["#4e4531", "#5a5039", "#42392a"][Math.floor(r() * 3)];
+      g.beginPath(); g.ellipse(rx, ry, rr, rr * 0.72, r(), 0, TAU); g.fill();
+    }
+    for (let i = 0; i < 3; i++) {
+      const tx = r() * W, ty = r() * H;
+      g.strokeStyle = "#3b3323"; g.lineWidth = 4; g.lineCap = "round";
+      g.beginPath(); g.moveTo(tx, ty + 20); g.lineTo(tx + 4, ty - 16); g.stroke();
+    }
+  }
+};
+
+/* shared prop: a car, used by three environments */
+function drawCar(g, x, y, rot, body, burned) {
+  g.save(); g.translate(x, y); g.rotate(rot);
+  g.fillStyle = "rgba(0,0,0,.28)"; g.fillRect(-31, -15, 62, 30);
+  g.fillStyle = body; g.fillRect(-30, -14, 60, 28);
+  g.fillStyle = burned ? "#15130f" : "rgba(150,200,230,.22)";
+  g.fillRect(-14, -10, 22, 20);
+  g.fillStyle = "#15130f";
+  g.fillRect(-30, -17, 12, 5); g.fillRect(18, -17, 12, 5);
+  g.fillRect(-30, 12, 12, 5); g.fillRect(18, 12, 12, 5);
+  if (!burned) { g.fillStyle = "rgba(255,240,180,.35)"; g.fillRect(28, -9, 4, 6); g.fillRect(28, 3, 4, 6); }
+  g.strokeStyle = "rgba(0,0,0,.45)"; g.lineWidth = 2; g.strokeRect(-30, -14, 60, 28);
+  g.restore();
+}
+
+/* ---- the offscreen prop layer ----
+   Rebuilt only when world, stage or canvas size changes, then blitted once
+   per frame. Keeps dozens of prop shapes off the per-frame path. */
+let propLayer = null, propKey = "";
+function buildPropLayer() {
+  const th = game.theme;
+  const key = (th ? th.env : "none") + "|" + game.cw + "|" + game.cs + "|" + W + "x" + H;
+  if (key === propKey && propLayer) return;
+  propKey = key;
+  if (!th || !PROPS[th.env]) { propLayer = null; return; }
+  if (!propLayer) propLayer = document.createElement("canvas");
+  propLayer.width = W; propLayer.height = H;
+  const pg = propLayer.getContext("2d");
+  pg.clearRect(0, 0, W, H);
+  const rng = seededRng(game.cw * 7919 + game.cs * 104729 + 13);
+  try { PROPS[th.env](pg, rng, W, H, game.cs - 1); }
+  catch (e) { propLayer = null; }      // a bad prop drawer must never kill the frame
+}
+function invalidatePropLayer() { propKey = ""; }
+
 /* ---------------- weapons ---------------- */
 const WEAPONS = [
   { name: "PISTOL",  short: "PSTL", dmg: 26, rof: 210, mag: 12, reload: 900,  spread: 0.035, speed: 14, pellets: 1, auto: false,
@@ -752,6 +1160,480 @@ const WEAPONS = [
   { name: "RIFLE",   short: "RIFL", dmg: 15, rof: 85,  mag: 32, reload: 1300, spread: 0.075, speed: 17, pellets: 1, auto: true,
     reserveMax: 210, sfx: "rifle",   knock: 2,  color: "#8ee8ff", tracer: 0.8 }
 ];
+
+
+
+/* ================= BOSS ART =================
+   Six silhouettes, all drawn in the boss's local rotated space. `rage`
+   swaps the palette and adds tells rather than changing the shape. */
+const BOSS_SKINS = {
+  butcher(g, b, r, rage) {                        // W1: huge infected human
+    g.strokeStyle = rage ? "#8a1f1f" : "#4a1c1c"; g.lineWidth = r * 0.42; g.lineCap = "round";
+    g.beginPath();
+    g.moveTo(0, -r * 0.55); g.lineTo(r * 1.25, -r * 0.4);
+    g.moveTo(0, r * 0.55);  g.lineTo(r * 1.25, r * 0.4); g.stroke();
+    g.fillStyle = b.flash > 0 ? "#fff" : (rage ? "#b33a3a" : "#8c3b3b");
+    g.beginPath(); g.arc(0, 0, r, 0, TAU); g.fill();
+    g.strokeStyle = rage ? "#ff6b6b" : "#3a1414"; g.lineWidth = 3; g.stroke();
+    g.fillStyle = "rgba(20,6,6,.45)";              // blood apron
+    g.beginPath(); g.arc(-r * 0.2, 0, r * 0.72, 0, TAU); g.fill();
+    g.fillStyle = b.flash > 0 ? "#fff" : "#3a1414";
+    g.beginPath(); g.arc(r * 0.45, 0, r * 0.5, 0, TAU); g.fill();
+    g.fillStyle = rage ? "#ffdd33" : "#ff4d4d";
+    g.beginPath(); g.arc(r * 0.7, -r * 0.2, r * 0.13, 0, TAU); g.fill();
+    g.beginPath(); g.arc(r * 0.7, r * 0.2, r * 0.13, 0, TAU); g.fill();
+    g.fillStyle = "#c8ccc4";                       // cleaver
+    g.fillRect(r * 0.9, -r * 0.75, r * 0.75, r * 0.34);
+  },
+
+  crusher(g, b, r, rage) {                         // W2: enormous arms
+    g.strokeStyle = rage ? "#7a5a2a" : "#3b3a30"; g.lineWidth = r * 0.72; g.lineCap = "round";
+    g.beginPath();
+    g.moveTo(-r * 0.2, -r * 0.6); g.lineTo(r * 1.5, -r * 0.75);
+    g.moveTo(-r * 0.2, r * 0.6);  g.lineTo(r * 1.5, r * 0.75); g.stroke();
+    g.fillStyle = rage ? "#8a7250" : "#5a5c4a";    // fists
+    g.beginPath(); g.arc(r * 1.55, -r * 0.78, r * 0.42, 0, TAU); g.fill();
+    g.beginPath(); g.arc(r * 1.55, r * 0.78, r * 0.42, 0, TAU); g.fill();
+    g.fillStyle = b.flash > 0 ? "#fff" : (rage ? "#77796a" : "#5d6b76");
+    g.beginPath(); g.ellipse(0, 0, r * 0.95, r * 1.12, 0, 0, TAU); g.fill();
+    g.strokeStyle = rage ? "#c8a020" : "#232a33"; g.lineWidth = 3; g.stroke();
+    g.fillStyle = "#c8901e";                       // shredded high-vis
+    g.fillRect(-r * 0.5, -r * 0.9, r * 0.9, r * 1.8);
+    g.fillStyle = "rgba(240,240,190,.5)"; g.fillRect(-r * 0.5, -r * 0.15, r * 0.9, r * 0.16);
+    g.fillStyle = b.flash > 0 ? "#fff" : "#3d4148";
+    g.beginPath(); g.arc(r * 0.35, 0, r * 0.42, 0, TAU); g.fill();
+    g.fillStyle = rage ? "#ffdd33" : "#ff5252";
+    g.beginPath(); g.arc(r * 0.55, -r * 0.17, r * 0.11, 0, TAU); g.fill();
+    g.beginPath(); g.arc(r * 0.55, r * 0.17, r * 0.11, 0, TAU); g.fill();
+  },
+
+  nightHunter(g, b, r, rage) {                     // W3: lean, clawed, eyeshine
+    g.strokeStyle = "#0b0f13"; g.lineWidth = r * 0.26; g.lineCap = "round";
+    for (const sgn of [-1, 1]) {
+      g.beginPath(); g.moveTo(0, sgn * r * 0.4); g.lineTo(r * 1.7, sgn * r * 0.55); g.stroke();
+      for (let k = -1; k <= 1; k++) {              // long claws
+        g.lineWidth = r * 0.08;
+        g.beginPath(); g.moveTo(r * 1.7, sgn * r * 0.55);
+        g.lineTo(r * 2.25, sgn * r * 0.55 + k * r * 0.3); g.stroke();
+      }
+      g.lineWidth = r * 0.26;
+    }
+    g.fillStyle = b.flash > 0 ? "#fff" : (rage ? "#20303c" : "#151d24");
+    g.beginPath(); g.ellipse(0, 0, r * 1.05, r * 0.72, 0, 0, TAU); g.fill();
+    g.strokeStyle = rage ? "#7dd53f" : "#070a0d"; g.lineWidth = 3; g.stroke();
+    g.fillStyle = "#0d1217";
+    g.beginPath(); g.ellipse(r * 0.72, 0, r * 0.48, r * 0.34, 0, 0, TAU); g.fill();
+    g.fillStyle = rage ? "#c6ff4d" : "#9dff5c";
+    g.beginPath(); g.arc(r * 0.9, -r * 0.17, r * 0.13, 0, TAU); g.fill();
+    g.beginPath(); g.arc(r * 0.9, r * 0.17, r * 0.13, 0, TAU); g.fill();
+    g.strokeStyle = rage ? "rgba(198,255,77,.5)" : "rgba(157,255,92,.25)";
+    g.lineWidth = 2; g.beginPath(); g.arc(0, 0, r * 1.25, 0, TAU); g.stroke();
+  },
+
+  abomination(g, b, r, rage) {                     // W4: machinery fused into it
+    g.strokeStyle = rage ? "#7a8a2a" : "#3a3428"; g.lineWidth = r * 0.3; g.lineCap = "round";
+    for (const sgn of [-1, 1]) {                   // four mutated limbs
+      g.beginPath(); g.moveTo(0, sgn * r * 0.5); g.lineTo(r * 1.45, sgn * r * 0.5); g.stroke();
+      g.beginPath(); g.moveTo(-r * 0.3, sgn * r * 0.8); g.lineTo(r * 0.7, sgn * r * 1.35); g.stroke();
+    }
+    g.fillStyle = b.flash > 0 ? "#fff" : (rage ? "#8aa03c" : "#6a7a44");
+    g.beginPath(); g.ellipse(0, 0, r * 1.06, r * 1.1, 0, 0, TAU); g.fill();
+    g.strokeStyle = "#2c331a"; g.lineWidth = 3; g.stroke();
+    g.fillStyle = "rgba(150,255,60,.34)";          // toxic bloom
+    g.beginPath(); g.arc(-r * 0.3, -r * 0.25, r * 0.55, 0, TAU); g.fill();
+    g.beginPath(); g.arc(-r * 0.15, r * 0.4, r * 0.38, 0, TAU); g.fill();
+    g.fillStyle = "#575049";                       // bolted plating
+    g.fillRect(-r * 0.3, -r * 0.95, r * 0.7, r * 1.9);
+    g.fillStyle = "#8f8880";
+    for (let i = -2; i <= 2; i++) { g.beginPath(); g.arc(r * 0.05, i * r * 0.42, r * 0.08, 0, TAU); g.fill(); }
+    g.strokeStyle = "#45403a"; g.lineWidth = r * 0.16;   // exhaust pipes
+    g.beginPath(); g.moveTo(-r * 0.5, -r * 0.5); g.lineTo(-r * 1.15, -r * 0.85);
+    g.moveTo(-r * 0.5, r * 0.5); g.lineTo(-r * 1.15, r * 0.85); g.stroke();
+    g.fillStyle = b.flash > 0 ? "#fff" : "#4a5a2c";
+    g.beginPath(); g.arc(r * 0.5, 0, r * 0.46, 0, TAU); g.fill();
+    g.fillStyle = rage ? "#eaff6b" : "#c6ff4d";
+    g.beginPath(); g.arc(r * 0.68, -r * 0.18, r * 0.12, 0, TAU); g.fill();
+    g.beginPath(); g.arc(r * 0.68, r * 0.18, r * 0.12, 0, TAU); g.fill();
+  },
+
+  patientZero(g, b, r, rage) {                     // W5: the source, exposed
+    g.strokeStyle = rage ? "#a06a9a" : "#7a6f96"; g.lineWidth = r * 0.2; g.lineCap = "round";
+    for (let i = 0; i < 6; i++) {                  // writhing tendrils
+      const a = (i / 6) * TAU + Math.sin(game.time / 300 + i) * 0.25;
+      g.beginPath(); g.moveTo(0, 0);
+      g.lineTo(Math.cos(a) * r * 1.6, Math.sin(a) * r * 1.6); g.stroke();
+    }
+    g.fillStyle = b.flash > 0 ? "#fff" : (rage ? "#c07ac0" : "#a98fd0");
+    g.beginPath(); g.arc(0, 0, r, 0, TAU); g.fill();
+    g.strokeStyle = rage ? "#ff8cd0" : "#5b4780"; g.lineWidth = 3; g.stroke();
+    // pulsing core
+    const pulse = 0.72 + Math.sin(game.time / 160) * 0.2;
+    g.fillStyle = "rgba(255,140,200," + pulse.toFixed(2) + ")";
+    g.beginPath(); g.arc(0, 0, r * 0.42, 0, TAU); g.fill();
+    g.fillStyle = "rgba(200,255,240,.5)";          // exposed cortex
+    g.beginPath(); g.arc(r * 0.55, 0, r * 0.5, 0, TAU); g.fill();
+    g.strokeStyle = "rgba(255,140,200,.6)"; g.lineWidth = 1.8;
+    for (let i = 0; i < 3; i++) {
+      g.beginPath(); g.arc(r * 0.55, 0, r * (0.16 + i * 0.13), 0, TAU); g.stroke();
+    }
+    g.fillStyle = rage ? "#fff" : "#7ef0d0";
+    g.beginPath(); g.arc(r * 0.72, -r * 0.2, r * 0.1, 0, TAU); g.fill();
+    g.beginPath(); g.arc(r * 0.72, r * 0.2, r * 0.1, 0, TAU); g.fill();
+  },
+
+  colossus(g, b, r, rage) {                        // W6: armoured endgame
+    g.strokeStyle = rage ? "#7a5230" : "#3b3a2c"; g.lineWidth = r * 0.6; g.lineCap = "round";
+    g.beginPath();
+    g.moveTo(-r * 0.1, -r * 0.6); g.lineTo(r * 1.4, -r * 0.7);
+    g.moveTo(-r * 0.1, r * 0.6);  g.lineTo(r * 1.4, r * 0.7); g.stroke();
+    g.fillStyle = b.flash > 0 ? "#fff" : (rage ? "#8f7a45" : "#79734a");
+    g.beginPath(); g.ellipse(0, 0, r * 1.0, r * 1.16, 0, 0, TAU); g.fill();
+    g.strokeStyle = "#33301e"; g.lineWidth = 3; g.stroke();
+    g.fillStyle = "#5e6552";                       // layered armour
+    g.beginPath(); g.moveTo(r * 0.05, -r * 1.0); g.lineTo(r * 0.85, -r * 0.4);
+    g.lineTo(r * 0.85, r * 0.4); g.lineTo(r * 0.05, r * 1.0); g.closePath(); g.fill();
+    g.strokeStyle = "#3b4034"; g.lineWidth = 2; g.stroke();
+    g.fillStyle = "#d8d0b8";                       // bone crest
+    for (let i = -2; i <= 2; i++) {
+      g.beginPath(); g.moveTo(-r * 0.55, i * r * 0.38);
+      g.lineTo(-r * 1.15, i * r * 0.5); g.lineTo(-r * 0.45, i * r * 0.55); g.closePath(); g.fill();
+    }
+    g.fillStyle = "#4a5140";                       // helm
+    g.beginPath(); g.arc(r * 0.5, 0, r * 0.6, -Math.PI, 0); g.fill();
+    g.fillStyle = b.flash > 0 ? "#fff" : "#5c5638";
+    g.beginPath(); g.arc(r * 0.5, r * 0.05, r * 0.46, 0, TAU); g.fill();
+    g.fillStyle = rage ? "#ffdd33" : "#ff6b2b";
+    g.beginPath(); g.arc(r * 0.7, -r * 0.18, r * 0.12, 0, TAU); g.fill();
+    g.beginPath(); g.arc(r * 0.7, r * 0.18, r * 0.12, 0, TAU); g.fill();
+  }
+};
+
+/* ================= ZOMBIE ART SETS =================
+   Shared primitives composed differently per world, so the same enemy type
+   reads as a different evolutionary stage in each chapter. Every skin draws
+   in the zombie's local rotated space: +x is forward. */
+
+function zLimbs(g, r, color, width, reach, lurch, spread, claw) {
+  g.strokeStyle = color; g.lineWidth = r * width; g.lineCap = "round";
+  g.beginPath();
+  g.moveTo(0, -r * spread); g.lineTo(r * reach, -r * spread * 0.7 + lurch);
+  g.moveTo(0, r * spread);  g.lineTo(r * reach, r * spread * 0.7 - lurch);
+  g.stroke();
+  if (claw) {                                   // splayed fingers on the reach
+    g.lineWidth = Math.max(1, r * 0.10);
+    for (const sgn of [-1, 1]) {
+      const bx = r * reach, by = sgn * r * spread * 0.7 + (sgn < 0 ? lurch : -lurch);
+      for (let k = -1; k <= 1; k++) {
+        g.beginPath(); g.moveTo(bx, by);
+        g.lineTo(bx + r * 0.34, by + k * r * 0.22); g.stroke();
+      }
+    }
+  }
+}
+
+function zTorso(g, r, color, edge, shape) {
+  g.fillStyle = color;
+  g.beginPath();
+  if (shape === "lean")      g.ellipse(0, 0, r * 1.02, r * 0.74, 0, 0, TAU);
+  else if (shape === "hulk") g.ellipse(0, 0, r * 0.98, r * 1.14, 0, 0, TAU);
+  else if (shape === "flat") g.ellipse(0, 0, r * 1.22, r * 0.6, 0, 0, TAU);
+  else                       g.arc(0, 0, r, 0, TAU);
+  g.fill();
+  g.strokeStyle = edge; g.lineWidth = 2; g.stroke();
+}
+
+function zHead(g, r, color, eye, style, off) {
+  const hx = r * (off === undefined ? 0.45 : off);
+  g.fillStyle = color;
+  g.beginPath();
+  if (style === "long") g.ellipse(hx + r * 0.1, 0, r * 0.6, r * 0.4, 0, 0, TAU);
+  else if (style === "lumpy") {
+    g.arc(hx, 0, r * 0.52, 0, TAU); g.fill();
+    g.beginPath(); g.arc(hx + r * 0.2, -r * 0.3, r * 0.26, 0, TAU);
+  } else g.arc(hx, 0, r * 0.52, 0, TAU);
+  g.fill();
+  g.fillStyle = eye;
+  g.beginPath(); g.arc(hx + r * 0.27, -r * 0.22, r * 0.12, 0, TAU); g.fill();
+  g.beginPath(); g.arc(hx + r * 0.27, r * 0.22, r * 0.12, 0, TAU); g.fill();
+}
+
+/* torn clothing patch, the cheap detail that sells "was a person" */
+function zCloth(g, r, color, w) {
+  g.fillStyle = color;
+  g.beginPath(); g.arc(-r * 0.25, 0, r * (w || 0.7), 0, TAU); g.fill();
+}
+
+const ZSKINS = {
+  /* ---- WORLD 1: fresh civilians, still recognisably human ---- */
+  outbreak: {
+    _shirt: ["#7d6a4e", "#5c6b7d", "#7d4f4f"],
+    walker(g, z, r, lurch, flash) {
+      zLimbs(g, r, "#6a5a42", 0.40, 1.22, lurch, 0.5);
+      zTorso(g, r, flash ? "#fff" : "#8a9a63", "#3d5522", "round");
+      zCloth(g, r, this._shirt[z.variant % 3]);
+      g.fillStyle = "rgba(120,20,20,.35)";        // blood down the front
+      g.beginPath(); g.ellipse(r * 0.1, r * 0.15, r * 0.3, r * 0.42, 0.4, 0, TAU); g.fill();
+      zHead(g, r, flash ? "#fff" : "#c8a882", "#ff4d4d", "round");
+    },
+    runner(g, z, r, lurch, flash) {
+      zLimbs(g, r, "#6a5a42", 0.30, 1.5, lurch * 1.6, 0.42);
+      zTorso(g, r, flash ? "#fff" : "#9fbb5c", "#54701f", "lean");
+      zCloth(g, r, this._shirt[z.variant % 3], 0.55);
+      zHead(g, r, flash ? "#fff" : "#c8a882", "#ff6b4d", "round", 0.62);
+    },
+    brute(g, z, r, lurch, flash) {
+      zLimbs(g, r, "#4a3f2e", 0.52, 1.16, lurch, 0.58);
+      zTorso(g, r, flash ? "#fff" : "#6d8353", "#26361f", "hulk");
+      g.fillStyle = "rgba(30,26,18,.45)";          // stretched vest
+      g.fillRect(-r * 0.5, -r * 0.75, r * 0.8, r * 1.5);
+      zHead(g, r, flash ? "#fff" : "#b09070", "#ff4d4d", "round", 0.5);
+    },
+    spitter(g, z, r, lurch, flash) {
+      zLimbs(g, r, "#5b4a63", 0.34, 1.24, lurch, 0.5);
+      zTorso(g, r, flash ? "#fff" : "#9b7fbe", "#4b2f6b", "round");
+      g.fillStyle = "rgba(190,140,240,.35)";       // early mutation sac
+      g.beginPath(); g.arc(-r * 0.3, -r * 0.3, r * 0.42, 0, TAU); g.fill();
+      zHead(g, r, flash ? "#fff" : "#b79ad0", "#e6b3ff", "lumpy");
+    }
+  },
+
+  /* ---- WORLD 2: uniformed city dead, heavier silhouettes ---- */
+  urban: {
+    walker(g, z, r, lurch, flash) {
+      zLimbs(g, r, "#2e3540", 0.42, 1.2, lurch, 0.52);
+      zTorso(g, r, flash ? "#fff" : "#5d6b76", "#232a33", "round");
+      if (z.variant % 3 === 0) {                   // police: vest + badge
+        g.fillStyle = "#232a33"; g.fillRect(-r * 0.45, -r * 0.8, r * 0.85, r * 1.6);
+        g.fillStyle = "#d8c14a"; g.fillRect(-r * 0.2, -r * 0.42, r * 0.22, r * 0.22);
+      } else if (z.variant % 3 === 1) {            // firefighter: reflective bands
+        g.fillStyle = "#7a3320"; g.beginPath(); g.arc(-r * 0.25, 0, r * 0.7, 0, TAU); g.fill();
+        g.fillStyle = "rgba(240,240,190,.6)";
+        g.fillRect(-r * 0.8, -r * 0.28, r * 1.5, r * 0.13);
+        g.fillRect(-r * 0.8, r * 0.16, r * 1.5, r * 0.13);
+      } else zCloth(g, r, "#454f59");
+      zHead(g, r, flash ? "#fff" : "#8d8579", "#ff5252", "round");
+    },
+    runner(g, z, r, lurch, flash) {
+      zLimbs(g, r, "#2b323b", 0.30, 1.55, lurch * 1.7, 0.4);
+      zTorso(g, r, flash ? "#fff" : "#77838d", "#2b323b", "lean");
+      g.fillStyle = "#333c45";                     // hood over the shoulders
+      g.beginPath(); g.arc(-r * 0.35, 0, r * 0.68, -1.0, 1.0); g.fill();
+      zHead(g, r, flash ? "#fff" : "#8d8579", "#ff7a52", "round", 0.62);
+    },
+    brute(g, z, r, lurch, flash) {                 // construction worker
+      zLimbs(g, r, "#3a3a30", 0.56, 1.14, lurch, 0.62);
+      zTorso(g, r, flash ? "#fff" : "#6b6f5a", "#2b2e24", "hulk");
+      g.fillStyle = "#c8901e";                     // high-vis
+      g.fillRect(-r * 0.55, -r * 0.85, r * 0.95, r * 1.7);
+      g.fillStyle = "rgba(240,240,190,.55)";
+      g.fillRect(-r * 0.55, -r * 0.18, r * 0.95, r * 0.14);
+      zHead(g, r, flash ? "#fff" : "#9a8f7e", "#ff5252", "round", 0.5);
+      g.fillStyle = "#e0a91e";                     // hard hat
+      g.beginPath(); g.arc(r * 0.52, 0, r * 0.56, -Math.PI, 0); g.fill();
+      g.fillRect(r * 0.0, -r * 0.58, r * 0.5, r * 0.12);
+    },
+    spitter(g, z, r, lurch, flash) {
+      zLimbs(g, r, "#43335e", 0.32, 1.3, lurch, 0.48);
+      zTorso(g, r, flash ? "#fff" : "#8b6bb0", "#3b2757", "round");
+      g.strokeStyle = "rgba(230,200,255,.5)"; g.lineWidth = 1.6;
+      for (let i = -1; i <= 1; i++) {              // exposed ribs
+        g.beginPath(); g.arc(-r * 0.1, i * r * 0.3, r * 0.5, -0.7, 0.7); g.stroke();
+      }
+      zHead(g, r, flash ? "#fff" : "#a389c4", "#e6b3ff", "lumpy");
+    }
+  },
+
+  /* ---- WORLD 3: night hunters, silhouettes and eyeshine ---- */
+  night: {
+    walker(g, z, r, lurch, flash) {
+      zLimbs(g, r, "#161c22", 0.38, 1.3, lurch, 0.5);
+      zTorso(g, r, flash ? "#fff" : "#2a333c", "#0e1318", "round");
+      zHead(g, r, flash ? "#fff" : "#1b232b", "#ffe14d", "round");
+    },
+    runner(g, z, r, lurch, flash) {
+      zLimbs(g, r, "#141a20", 0.26, 1.6, lurch * 1.8, 0.4);
+      zTorso(g, r, flash ? "#fff" : "#333e49", "#0e1318", "lean");
+      zHead(g, r, flash ? "#fff" : "#1b232b", "#ffd24d", "round", 0.64);
+    },
+    brute(g, z, r, lurch, flash) {
+      zLimbs(g, r, "#10161b", 0.54, 1.12, lurch, 0.6, true);
+      zTorso(g, r, flash ? "#fff" : "#27313a", "#0b0f13", "hulk");
+      zHead(g, r, flash ? "#fff" : "#151c22", "#ffcf4d", "round", 0.5);
+    },
+    spitter(g, z, r, lurch, flash) {
+      zLimbs(g, r, "#1a1428", 0.32, 1.3, lurch, 0.48);
+      zTorso(g, r, flash ? "#fff" : "#43335e", "#170f24", "round");
+      g.fillStyle = "rgba(190,130,255,.35)";
+      g.beginPath(); g.arc(-r * 0.3, -r * 0.25, r * 0.46, 0, TAU); g.fill();
+      zHead(g, r, flash ? "#fff" : "#2b2140", "#d98cff", "lumpy");
+    },
+    /* long-limbed, near-black, only its eyes carry */
+    stalker(g, z, r, lurch, flash) {
+      zLimbs(g, r, "#0c1116", 0.20, 1.95, lurch * 2.0, 0.34, true);
+      g.fillStyle = flash ? "#fff" : "#12181e";
+      g.beginPath(); g.ellipse(0, 0, r * 0.86, r * 0.6, 0, 0, TAU); g.fill();
+      g.strokeStyle = "#070a0d"; g.lineWidth = 1.6; g.stroke();
+      g.fillStyle = flash ? "#fff" : "#0d1217";
+      g.beginPath(); g.ellipse(r * 0.62, 0, r * 0.44, r * 0.3, 0, 0, TAU); g.fill();
+      g.fillStyle = "#9dff5c";                     // the tell in the dark
+      g.beginPath(); g.arc(r * 0.78, -r * 0.16, r * 0.11, 0, TAU); g.fill();
+      g.beginPath(); g.arc(r * 0.78, r * 0.16, r * 0.11, 0, TAU); g.fill();
+    },
+    /* belly-down, wide and low */
+    crawler(g, z, r, lurch, flash) {
+      g.strokeStyle = "#141a20"; g.lineWidth = r * 0.22; g.lineCap = "round";
+      for (const sgn of [-1, 1]) {
+        g.beginPath(); g.moveTo(-r * 0.2, sgn * r * 0.3);
+        g.lineTo(r * 0.9, sgn * (r * 0.85 + lurch * sgn)); g.stroke();
+        g.beginPath(); g.moveTo(-r * 0.5, sgn * r * 0.3);
+        g.lineTo(-r * 1.1, sgn * (r * 0.7 - lurch * sgn)); g.stroke();
+      }
+      zTorso(g, r, flash ? "#fff" : "#2f3a44", "#0e1318", "flat");
+      zHead(g, r, flash ? "#fff" : "#1b232b", "#ff9d4d", "long", 0.75);
+    }
+  },
+
+  /* ---- WORLD 4: industrial mutation, metal fused into flesh ---- */
+  industrial: {
+    walker(g, z, r, lurch, flash) {
+      zLimbs(g, r, "#4a4034", 0.44, 1.28, lurch, 0.52);
+      zTorso(g, r, flash ? "#fff" : "#7d8a4a", "#39401f", "round");
+      g.fillStyle = "#8a5a20";                     // grease-soaked overalls
+      g.fillRect(-r * 0.5, -r * 0.8, r * 0.9, r * 1.6);
+      g.fillStyle = "rgba(150,220,70,.30)";        // contamination bloom
+      g.beginPath(); g.arc(r * 0.1, -r * 0.3, r * 0.34, 0, TAU); g.fill();
+      zHead(g, r, flash ? "#fff" : "#94a05a", "#c6ff4d", "lumpy");
+      g.fillStyle = "#c8a020";                     // cracked hard hat
+      g.beginPath(); g.arc(r * 0.5, 0, r * 0.5, -Math.PI, -0.4); g.fill();
+    },
+    runner(g, z, r, lurch, flash) {                // elongated limbs
+      zLimbs(g, r, "#3f3a2c", 0.24, 1.85, lurch * 1.9, 0.38, true);
+      zTorso(g, r, flash ? "#fff" : "#93a84f", "#414d1c", "lean");
+      g.strokeStyle = "#5c6b2a"; g.lineWidth = 2;  // stretched spine
+      g.beginPath(); g.moveTo(-r * 0.7, 0); g.lineTo(r * 0.5, 0); g.stroke();
+      zHead(g, r, flash ? "#fff" : "#9db35c", "#d8ff5c", "long", 0.7);
+    },
+    brute(g, z, r, lurch, flash) {
+      zLimbs(g, r, "#3a3428", 0.58, 1.1, lurch, 0.64);
+      zTorso(g, r, flash ? "#fff" : "#6a7a44", "#2c331a", "hulk");
+      g.fillStyle = "#575049";                     // bolted plate
+      g.fillRect(-r * 0.35, -r * 0.9, r * 0.75, r * 1.8);
+      g.fillStyle = "#8f8880";
+      for (let i = -1; i <= 1; i++) { g.beginPath(); g.arc(r * 0.05, i * r * 0.6, r * 0.09, 0, TAU); g.fill(); }
+      zHead(g, r, flash ? "#fff" : "#7d8a52", "#c6ff4d", "round", 0.52);
+    },
+    spitter(g, z, r, lurch, flash) {
+      zLimbs(g, r, "#3d4a26", 0.34, 1.3, lurch, 0.5);
+      zTorso(g, r, flash ? "#fff" : "#6f9c3a", "#334a16", "round");
+      g.fillStyle = "rgba(150,255,60,.45)";        // swollen acid sac
+      g.beginPath(); g.arc(-r * 0.32, 0, r * 0.62, 0, TAU); g.fill();
+      g.strokeStyle = "rgba(200,255,120,.6)"; g.lineWidth = 1.6; g.stroke();
+      zHead(g, r, flash ? "#fff" : "#84ad46", "#eaff6b", "lumpy");
+    }
+  },
+
+  /* ---- WORLD 5: failed experiments, clinical and wrong ---- */
+  experimental: {
+    walker(g, z, r, lurch, flash) {
+      zLimbs(g, r, "#96a3a8", 0.38, 1.24, lurch, 0.5);
+      zTorso(g, r, flash ? "#fff" : "#c3ced2", "#7d888c", "round");
+      g.fillStyle = "rgba(140,20,20,.30)";         // seeped dressings
+      g.beginPath(); g.arc(r * 0.1, r * 0.2, r * 0.34, 0, TAU); g.fill();
+      g.strokeStyle = "#8f9ba0"; g.lineWidth = 1.6;
+      g.beginPath(); g.moveTo(-r * 0.9, -r * 0.2); g.lineTo(-r * 1.5, -r * 0.6); g.stroke();
+      zHead(g, r, flash ? "#fff" : "#b9c4c8", "#7ef0d0", "round");
+    },
+    runner(g, z, r, lurch, flash) {                // asymmetric failure
+      zLimbs(g, r, "#8fa0a5", 0.22, 1.7, lurch * 1.8, 0.36, true);
+      zTorso(g, r, flash ? "#fff" : "#bcc9cd", "#79868a", "lean");
+      g.fillStyle = flash ? "#fff" : "#9ad8c4";    // overgrown shoulder
+      g.beginPath(); g.arc(-r * 0.2, -r * 0.55, r * 0.44, 0, TAU); g.fill();
+      zHead(g, r, flash ? "#fff" : "#b3c0c4", "#8ff5d8", "long", 0.66);
+    },
+    brute(g, z, r, lurch, flash) {
+      zLimbs(g, r, "#7f8d92", 0.56, 1.12, lurch, 0.62);
+      zTorso(g, r, flash ? "#fff" : "#a8b6ba", "#6b787c", "hulk");
+      g.strokeStyle = "#5f6a6e"; g.lineWidth = r * 0.16;   // restraint straps
+      for (let i = -1; i <= 1; i++) {
+        g.beginPath(); g.moveTo(-r * 0.9, i * r * 0.45); g.lineTo(r * 0.85, i * r * 0.45); g.stroke();
+      }
+      zHead(g, r, flash ? "#fff" : "#9caaae", "#7ef0d0", "round", 0.5);
+    },
+    spitter(g, z, r, lurch, flash) {
+      zLimbs(g, r, "#7a6f96", 0.32, 1.32, lurch, 0.48);
+      zTorso(g, r, flash ? "#fff" : "#a98fd0", "#5b4780", "round");
+      g.fillStyle = "rgba(200,255,240,.40)";       // exposed cortex
+      g.beginPath(); g.arc(r * 0.42, 0, r * 0.52, 0, TAU); g.fill();
+      g.strokeStyle = "rgba(255,140,200,.55)"; g.lineWidth = 1.4;
+      g.beginPath(); g.arc(r * 0.42, 0, r * 0.34, 0, TAU); g.stroke();
+      zHead(g, r, flash ? "#fff" : "#b9a3da", "#ff8cd0", "lumpy", 0.3);
+    },
+    crawler(g, z, r, lurch, flash) {
+      g.strokeStyle = "#8b989d"; g.lineWidth = r * 0.20; g.lineCap = "round";
+      for (const sgn of [-1, 1]) {
+        g.beginPath(); g.moveTo(-r * 0.2, sgn * r * 0.3);
+        g.lineTo(r * 0.95, sgn * (r * 0.9 + lurch * sgn)); g.stroke();
+      }
+      zTorso(g, r, flash ? "#fff" : "#b5c2c6", "#778488", "flat");
+      zHead(g, r, flash ? "#fff" : "#a4b1b5", "#8ff5d8", "long", 0.78);
+    }
+  },
+
+  /* ---- WORLD 6: armoured, evolved, bone-plated ---- */
+  evolved: {
+    _plate(g, r) {
+      g.fillStyle = "#5e6552";
+      g.beginPath(); g.moveTo(r * 0.1, -r * 0.9); g.lineTo(r * 0.75, -r * 0.35);
+      g.lineTo(r * 0.75, r * 0.35); g.lineTo(r * 0.1, r * 0.9); g.closePath(); g.fill();
+      g.strokeStyle = "#3b4034"; g.lineWidth = 2; g.stroke();
+    },
+    walker(g, z, r, lurch, flash) {
+      zLimbs(g, r, "#4a4736", 0.44, 1.26, lurch, 0.52, true);
+      zTorso(g, r, flash ? "#fff" : "#8a7d4f", "#3c3a22", "round");
+      ZSKINS.evolved._plate(g, r);
+      g.fillStyle = "#d8d0b8";                     // bone spurs
+      for (let i = -1; i <= 1; i += 2) {
+        g.beginPath(); g.moveTo(-r * 0.5, i * r * 0.5); g.lineTo(-r * 1.0, i * r * 0.8);
+        g.lineTo(-r * 0.4, i * r * 0.85); g.closePath(); g.fill();
+      }
+      zHead(g, r, flash ? "#fff" : "#8c8158", "#ff7a2b", "round");
+    },
+    runner(g, z, r, lurch, flash) {
+      zLimbs(g, r, "#443f2e", 0.24, 1.75, lurch * 1.9, 0.38, true);
+      zTorso(g, r, flash ? "#fff" : "#9a8a55", "#453f26", "lean");
+      g.fillStyle = "#5e6552";
+      g.fillRect(-r * 0.1, -r * 0.55, r * 0.6, r * 1.1);
+      zHead(g, r, flash ? "#fff" : "#8f8358", "#ff9a3c", "long", 0.68);
+    },
+    brute(g, z, r, lurch, flash) {
+      zLimbs(g, r, "#3b3a2c", 0.60, 1.08, lurch, 0.66, true);
+      zTorso(g, r, flash ? "#fff" : "#79734a", "#33301e", "hulk");
+      ZSKINS.evolved._plate(g, r);
+      g.fillStyle = "#4a5140";                     // combat helm
+      g.beginPath(); g.arc(r * 0.5, 0, r * 0.6, -Math.PI, 0); g.fill();
+      g.fillStyle = "#c23b2b"; g.fillRect(r * 0.2, -r * 0.1, r * 0.7, r * 0.2);
+      zHead(g, r, flash ? "#fff" : "#7d7550", "#ff6b2b", "round", 0.5);
+    },
+    spitter(g, z, r, lurch, flash) {
+      zLimbs(g, r, "#4a3a52", 0.34, 1.32, lurch, 0.5, true);
+      zTorso(g, r, flash ? "#fff" : "#9a6fa8", "#4a2f57", "round");
+      g.fillStyle = "rgba(255,170,80,.42)";
+      g.beginPath(); g.arc(-r * 0.3, 0, r * 0.6, 0, TAU); g.fill();
+      g.fillStyle = "#d8d0b8";
+      for (let i = -1; i <= 1; i += 2) {
+        g.beginPath(); g.moveTo(-r * 0.3, i * r * 0.55); g.lineTo(-r * 0.6, i * r * 1.0);
+        g.lineTo(-r * 0.05, i * r * 0.8); g.closePath(); g.fill();
+      }
+      zHead(g, r, flash ? "#fff" : "#a884b5", "#ffb45c", "lumpy");
+    }
+  }
+};
+
+/* Endless keeps the original look; campaign resolves its world's set. */
+function zombieSkinSet() {
+  const th = game.theme;
+  return th && ZSKINS[th.zombieSet] ? ZSKINS[th.zombieSet] : null;
+}
 
 /* ---------------- entities ---------------- */
 class Player {
@@ -1000,6 +1882,8 @@ const ZTYPES = {
   runner: { hp: 30,  speed: 1.75, r: 11, dmg: 8,  points: 18, color: "#a8c94a", dark: "#54701f", touch: 480 },
   brute:  { hp: 190, speed: 0.55, r: 21, dmg: 22, points: 45, color: "#4d6b4a", dark: "#26361f", touch: 800 },
   boss:   { hp: 950, speed: 0.62, r: 34, dmg: 30, points: 900, color: "#8c3b3b", dark: "#4a1c1c", touch: 700 },
+  stalker:{ hp: 34,  speed: 1.35, r: 12, dmg: 11, points: 26, color: "#2a333c", dark: "#12181e", touch: 560 },
+  crawler:{ hp: 26,  speed: 1.60, r: 11, dmg: 8,  points: 20, color: "#2f3a44", dark: "#0e1318", touch: 500 },
   spitter:{ hp: 55,  speed: 0.9,  r: 13, dmg: 12, points: 30, color: "#9b6bd6", dark: "#4b2f6b", touch: 700, ranged: true }
 };
 
@@ -1022,6 +1906,7 @@ class Zombie {
     this.angle = 0;
     this.nextSpit = game.time + rand(1500, 3500);
     this.wobble = rand(0.7, 1.3);
+    this.variant = randInt(0, 2);   // picks clothing / unit within a world set
   }
   hurt(n, kx, ky) {
     this.hp -= n;
@@ -1110,6 +1995,13 @@ class Zombie {
   }
   draw(g) {
     const t = this.t;
+    // the stalker only resolves up close -- at range it is barely there
+    let ghost = 1;
+    if (this.type === "stalker") {
+      const d = Math.hypot(player.x - this.x, player.y - this.y);
+      ghost = clamp(1.15 - (d - 90) / 240, 0.12, 1);
+    }
+    if (ghost < 1) g.globalAlpha = ghost;
     g.fillStyle = "rgba(0,0,0,.3)";
     g.beginPath(); g.ellipse(this.x, this.y + this.r * 0.85, this.r * 0.95, this.r * 0.42, 0, 0, TAU); g.fill();
 
@@ -1117,31 +2009,33 @@ class Zombie {
     g.translate(this.x, this.y);
     g.rotate(this.angle);
     const lurch = Math.sin(this.phase * 2) * (this.r * 0.12);
+    const flash = this.flash > 0;
 
-    // arms reaching forward
-    g.strokeStyle = t.dark; g.lineWidth = this.r * 0.42; g.lineCap = "round";
-    g.beginPath();
-    g.moveTo(0, -this.r * 0.5); g.lineTo(this.r * 1.25, -this.r * 0.35 + lurch);
-    g.moveTo(0, this.r * 0.5);  g.lineTo(this.r * 1.25, this.r * 0.35 - lurch);
-    g.stroke();
-
-    // body
-    g.fillStyle = this.flash > 0 ? "#ffffff" : t.color;
-    g.beginPath(); g.arc(0, 0, this.r, 0, TAU); g.fill();
-    g.strokeStyle = t.dark; g.lineWidth = 2; g.stroke();
-
-    // torn shirt
-    g.fillStyle = "rgba(0,0,0,.18)";
-    g.beginPath(); g.arc(-this.r * 0.25, 0, this.r * 0.7, 0, TAU); g.fill();
-
-    // head + eyes
-    g.fillStyle = this.flash > 0 ? "#fff" : t.dark;
-    g.beginPath(); g.arc(this.r * 0.45, 0, this.r * 0.52, 0, TAU); g.fill();
-    g.fillStyle = this.type === "spitter" ? "#e6b3ff" : "#ff4d4d";
-    g.beginPath(); g.arc(this.r * 0.72, -this.r * 0.22, this.r * 0.12, 0, TAU); g.fill();
-    g.beginPath(); g.arc(this.r * 0.72, this.r * 0.22, this.r * 0.12, 0, TAU); g.fill();
+    const set = zombieSkinSet();
+    const skin = set && set[this.type];
+    if (skin) {
+      skin.call(set, g, this, this.r, lurch, flash);
+    } else {
+      // endless, or any type a set does not skin, keeps the original look
+      g.strokeStyle = t.dark; g.lineWidth = this.r * 0.42; g.lineCap = "round";
+      g.beginPath();
+      g.moveTo(0, -this.r * 0.5); g.lineTo(this.r * 1.25, -this.r * 0.35 + lurch);
+      g.moveTo(0, this.r * 0.5);  g.lineTo(this.r * 1.25, this.r * 0.35 - lurch);
+      g.stroke();
+      g.fillStyle = flash ? "#ffffff" : t.color;
+      g.beginPath(); g.arc(0, 0, this.r, 0, TAU); g.fill();
+      g.strokeStyle = t.dark; g.lineWidth = 2; g.stroke();
+      g.fillStyle = "rgba(0,0,0,.18)";
+      g.beginPath(); g.arc(-this.r * 0.25, 0, this.r * 0.7, 0, TAU); g.fill();
+      g.fillStyle = flash ? "#fff" : t.dark;
+      g.beginPath(); g.arc(this.r * 0.45, 0, this.r * 0.52, 0, TAU); g.fill();
+      g.fillStyle = this.type === "spitter" ? "#e6b3ff" : "#ff4d4d";
+      g.beginPath(); g.arc(this.r * 0.72, -this.r * 0.22, this.r * 0.12, 0, TAU); g.fill();
+      g.beginPath(); g.arc(this.r * 0.72, this.r * 0.22, this.r * 0.12, 0, TAU); g.fill();
+    }
     g.restore();
 
+    if (ghost < 1) g.globalAlpha = 1;
     // hp bar for tanky ones
     if (this.hp < this.maxHp && (this.type === "brute" || this.maxHp > 60)) {
       const w = this.r * 2, h = 3.5, x = this.x - w / 2, y = this.y - this.r - 9;
@@ -1241,25 +2135,8 @@ class Boss extends Zombie {
       g.beginPath(); g.arc(0, 0, r * 1.5, 0, TAU); g.fill();
       g.globalAlpha = 1;
     }
-    g.strokeStyle = rage ? "#8a1f1f" : "#4a1c1c"; g.lineWidth = r * 0.42; g.lineCap = "round";
-    g.beginPath();
-    g.moveTo(0, -r * 0.55); g.lineTo(r * 1.25, -r * 0.4);
-    g.moveTo(0, r * 0.55);  g.lineTo(r * 1.25, r * 0.4);
-    g.stroke();
-    g.fillStyle = this.flash > 0 ? "#ffffff" : (rage ? "#b33a3a" : "#8c3b3b");
-    g.beginPath(); g.arc(0, 0, r, 0, TAU); g.fill();
-    g.strokeStyle = rage ? "#ff6b6b" : "#3a1414"; g.lineWidth = 3; g.stroke();
-    // butcher's apron
-    g.fillStyle = "rgba(20,6,6,.45)";
-    g.beginPath(); g.arc(-r * 0.2, 0, r * 0.72, 0, TAU); g.fill();
-    g.fillStyle = this.flash > 0 ? "#fff" : "#3a1414";
-    g.beginPath(); g.arc(r * 0.45, 0, r * 0.5, 0, TAU); g.fill();
-    g.fillStyle = rage ? "#ffdd33" : "#ff4d4d";
-    g.beginPath(); g.arc(r * 0.7, -r * 0.2, r * 0.13, 0, TAU); g.fill();
-    g.beginPath(); g.arc(r * 0.7, r * 0.2, r * 0.13, 0, TAU); g.fill();
-    // cleaver
-    g.fillStyle = "#c8ccc4";
-    g.fillRect(r * 0.9, -r * 0.75, r * 0.75, r * 0.34);
+    const art = (game.theme && BOSS_SKINS[game.theme.bossArt]) || BOSS_SKINS.butcher;
+    art(g, this, r, rage);
     g.restore();
   }
 }
@@ -1488,6 +2365,7 @@ const game = {
   plan: null, planIdx: 0,  // wave plan for the current stage
   eventMod: null, dark: 0, diff: 1, theme: null,
   boss: null, eventBanner: null, eventBannerTime: 0,
+  bossPending: null, bossWarnTime: 0, introWorld: null,
   time: 0,
   score: 0, kills: 0,
   shotsFired: 0, shotsHit: 0, headshots: 0, maxCombo: 0,
@@ -1513,6 +2391,7 @@ const game = {
     this.plan = null; this.planIdx = 0;
     this.eventMod = null; this.dark = 0; this.boss = null;
     this.eventBanner = null; this.eventBannerTime = 0;
+    this.bossPending = null; this.bossWarnTime = 0;
     if (this.mode === "endless") { this.diff = 1; this.theme = null; }
   },
   addScore(n, x, y, crit) {
@@ -1564,9 +2443,10 @@ const game = {
       const world = WORLDS.find(w => w.id === this.cw);
       this.toSpawn = spec.count;
       this.spawnGap = 900;
-      this.banner = "BOSS  \u00b7  " + world.boss.name; this.bannerTime = 2600;
-      this.boss = new Boss(world.boss, W / 2, -70, world.diff);
-      zombies.push(this.boss);
+      this.banner = null; this.bannerTime = 0;
+      // hold the boss back behind a warning so its entrance lands
+      this.bossPending = world.boss;
+      this.bossWarnTime = 2400;
       SFX.wave(); SFX.blast();
     } else if (this.eventMod) {
       const e = this.eventMod;
@@ -1602,7 +2482,9 @@ const game = {
     this.mode = "campaign";
     this.cw = worldId; this.cs = stageNo;
     this.diff = world.diff;
-    this.theme = world.theme;
+    this.theme = WORLD_THEMES[world.id] || null;
+    invalidatePropLayer();
+    seedAtmos();
     this.reset();
     this.plan = buildWavePlan(world, stageNo - 1);
     this.planIdx = 0;
@@ -1735,7 +2617,7 @@ const game = {
 
 /* ================= SCREENS =================
    One place decides which overlay is up, so no two can stack. */
-const SCREENS = ["menu", "how", "settings", "worlds", "stages", "stagedone", "worlddone", "gameover", "paused"];
+const SCREENS = ["menu", "how", "settings", "worlds", "worldintro", "stages", "stagedone", "worlddone", "gameover", "paused"];
 let overlayShown = true;   // cheap mirror of "is any overlay up"
 function showScreen(id) {
   for (const sc of SCREENS) {
@@ -1760,6 +2642,68 @@ function goMenu() {
   checkOrientation();
 }
 
+
+/* Draws a world's environment into any canvas at any size, reusing the same
+   prop drawers the game uses. Powers both the select previews and the intro. */
+function renderWorldPreview(cv, worldId, seedStage) {
+  const th = WORLD_THEMES[worldId];
+  const g = cv.getContext("2d");
+  const w = cv.width, h = cv.height;
+  g.clearRect(0, 0, w, h);
+  if (!th) return;
+  const sky = g.createLinearGradient(0, 0, 0, h);
+  sky.addColorStop(0, th.sky ? th.sky[0] : th.ground);
+  sky.addColorStop(1, th.sky ? th.sky[1] : th.ground);
+  g.fillStyle = sky; g.fillRect(0, 0, w, h);
+  g.fillStyle = th.ground; g.fillRect(0, 0, w, h);
+  // draw props at the world's real scale, then squash into the thumbnail
+  const RW = 900, RH = 560;
+  g.save();
+  g.scale(w / RW, h / RH);
+  g.beginPath(); g.rect(0, 0, RW, RH); g.clip();
+  try { PROPS[th.env](g, seededRng(worldId * 7919 + (seedStage || 1) * 104729 + 13), RW, RH, 0); }
+  catch (e) { /* a preview must never break the menu */ }
+  g.restore();
+  if (th.tint) { g.fillStyle = th.tint; g.fillRect(0, 0, w, h); }
+  const L = th.light || {};
+  const wash = L.warm || L.moon || L.emergency;
+  if (wash) { g.fillStyle = wash; g.fillRect(0, 0, w, h); }
+  const vg = g.createRadialGradient(w / 2, h / 2, h * 0.3, w / 2, h / 2, h * 0.9);
+  vg.addColorStop(0, "rgba(0,0,0,0)");
+  vg.addColorStop(1, "rgba(0,0,0," + ((L.vignette || .3) + .15).toFixed(2) + ")");
+  g.fillStyle = vg; g.fillRect(0, 0, w, h);
+  g.strokeStyle = th.edge; g.lineWidth = 2; g.strokeRect(1, 1, w - 2, h - 2);
+}
+
+const WORLD_INTRO = {
+  1: "THE INFECTION HAS BEGUN.\nTHE STREETS ARE NOT SAFE ANY MORE.",
+  2: "THE CITY HAS FALLEN.\nBUT SOMETHING IS STILL MOVING IN THE RUINS.",
+  3: "THE LIGHTS WENT OUT HOURS AGO.\nSOMETHING LEARNED TO HUNT IN THE DARK.",
+  4: "THEY WERE MAKING SOMETHING HERE.\nIT IS STILL ON THE PRODUCTION LINE.",
+  5: "THE CURE WAS NEVER COMING.\nTHIS IS WHERE IT WAS BORN.",
+  6: "NOTHING LEFT TO CONTAIN.\nONLY WHAT THE INFECTION BECAME."
+};
+
+/* Shown once per world, then remembered in the save. */
+function showWorldIntro(worldId, after) {
+  const w = WORLDS.find(x => x.id === worldId);
+  game.state = "worldintro";
+  $("wiNum").textContent = "WORLD " + String(worldId).padStart(2, "0");
+  $("wiName").textContent = w.name;
+  $("wiText").textContent = WORLD_INTRO[worldId] || w.desc;
+  const cv = $("wiCanvas");
+  cv.width = 420; cv.height = 150;
+  renderWorldPreview(cv, worldId, 1);
+  $("wiGo").onclick = () => {
+    audio();
+    Progress.world(worldId).introSeen = true;
+    Progress.save();
+    after();
+  };
+  hideAllScreens(); showScreen("worldintro");
+  checkOrientation();
+}
+
 /* ---- world select ---- */
 function showWorlds() {
   game.state = "worlds";
@@ -1772,6 +2716,11 @@ function showWorlds() {
     const card = document.createElement("div");
     card.className = "card" + (pw.unlocked ? (pw.completed ? " done" : "") : " locked");
     const num = "WORLD " + String(w.id).padStart(2, "0");
+    const prev = document.createElement("div");
+    prev.className = "previewWrap";
+    const pcv = document.createElement("canvas");
+    pcv.width = 300; pcv.height = 62;
+    prev.appendChild(pcv);
     if (pw.unlocked) {
       const cleared = Object.values(pw.stages).filter(x => x.completed).length;
       card.innerHTML =
@@ -1783,7 +2732,11 @@ function showWorlds() {
         '<div class="meta">' + cleared + ' / ' + w.stages.length + ' STAGES</div>';
       card.querySelector(".nm").textContent = w.name;
       card.querySelector(".ds").textContent = w.desc;
-      card.addEventListener("click", () => { audio(); showStages(w.id); });
+      card.addEventListener("click", () => {
+        audio();
+        if (!Progress.world(w.id).introSeen) showWorldIntro(w.id, () => showStages(w.id));
+        else showStages(w.id);
+      });
     } else {
       const prev = WORLDS.find(x => x.id === w.id - 1);
       card.innerHTML =
@@ -1795,6 +2748,8 @@ function showWorlds() {
       card.querySelector(".ds").textContent = "Complete WORLD " +
         String(prev ? prev.id : 1).padStart(2, "0") + " to unlock";
     }
+    card.insertBefore(prev, card.firstChild);
+    renderWorldPreview(pcv, w.id, 1);
     grid.appendChild(card);
   }
   hideAllScreens(); showScreen("worlds");
@@ -1821,6 +2776,12 @@ function showStages(worldId) {
       '<div class="snm"></div>' +
       '<div class="ss">' + (ps.unlocked ? stars(ps.stars) : "\uD83D\uDD12") + '</div>';
     row.querySelector(".snm").textContent = st.name;
+    const th = WORLD_THEMES[worldId];
+    if (th && th.stageEnv && th.stageEnv[i]) {
+      const envTag = document.createElement("div");
+      envTag.className = "meta"; envTag.textContent = th.stageEnv[i];
+      row.querySelector(".snm").appendChild(envTag);
+    }
     if (st.boss) {
       const tag = document.createElement("div");
       tag.className = "boss"; tag.textContent = "BOSS";
@@ -1896,7 +2857,10 @@ function showWorldComplete() {
     audio();
     const nw = res.unlockedWorld;
     pendingWorldComplete = null;
-    if (nw) showStages(nw.id); else showWorlds();
+    if (nw) {
+      if (!Progress.world(nw.id).introSeen) showWorldIntro(nw.id, () => showStages(nw.id));
+      else showStages(nw.id);
+    } else showWorlds();
   };
   hideAllScreens(); showScreen("worlddone");
   checkOrientation();
@@ -1926,6 +2890,7 @@ function startEndless() {
   audio();
   game.mode = "endless";
   game.theme = null; game.diff = 1;
+  invalidatePropLayer(); seedAtmos();
   game.reset();
   game.state = "play";
   hideAllScreens();
@@ -2092,29 +3057,148 @@ function update(dt) {
   game.redFlash *= Math.pow(0.90, dt);
   game.flash *= Math.pow(0.84, dt);
   const wantDark = (game.eventMod && game.eventMod.dark) ? 0.92
-                 : (game.theme && game.theme.dark ? 0.5 : 0);
+                 : (game.theme && game.theme.dark ? 0.72 : 0);
   game.dark += (wantDark - game.dark) * Math.min(1, 0.05 * dt);
   if (game.eventBannerTime > 0) game.eventBannerTime -= 16.6 * dt;
+  updateAtmos(dt);
+  if (game.bossWarnTime > 0) {
+    game.bossWarnTime -= 16.6 * dt;
+    if (game.bossWarnTime <= 0 && game.bossPending) {
+      const world = WORLDS.find(w => w.id === game.cw);
+      game.boss = new Boss(game.bossPending, W / 2, -70, world.diff);
+      zombies.push(game.boss);
+      game.bossPending = null;
+      game.shake = Math.min(24, game.shake + 14);
+      game.banner = world.boss.name; game.bannerTime = 1800;
+      SFX.blast();
+    }
+  }
   if (player.shieldFlash > 0) player.shieldFlash -= 16.6 * dt;
 }
 
 /* ---------------- render ---------------- */
-function drawGround(g) {
-  // each world paints the same shapes with its own palette -- no assets
+/* ---- atmosphere: a fixed pool, never allocated per frame ----
+   Sized from the theme and capped, so a phone never pays for more motes
+   than the effect needs. */
+const MAX_ATMOS = 60;
+const atmos = [];
+for (let i = 0; i < MAX_ATMOS; i++) atmos.push({ x: 0, y: 0, r: 1, a: 0, vx: 0, vy: 0, on: false });
+let atmosKind = null, atmosCount = 0;
+
+function seedAtmos() {
+  const th = game.theme;
+  const cfg = th && th.atmos;
+  atmosKind = cfg ? cfg.kind : null;
+  atmosCount = cfg ? Math.min(MAX_ATMOS, cfg.n) : 0;
+  for (let i = 0; i < MAX_ATMOS; i++) {
+    const p = atmos[i];
+    p.on = i < atmosCount;
+    if (!p.on) continue;
+    p.x = Math.random() * W; p.y = Math.random() * H;
+    p.r = cfg.size[0] + Math.random() * (cfg.size[1] - cfg.size[0]);
+    p.a = cfg.alpha * (0.5 + Math.random() * 0.5);
+    p.vx = cfg.drift[0] * (0.6 + Math.random() * 0.8);
+    p.vy = cfg.drift[1] * (0.6 + Math.random() * 0.8);
+  }
+}
+
+function updateAtmos(dt) {
+  if (!atmosCount) return;
+  for (let i = 0; i < atmosCount; i++) {
+    const p = atmos[i];
+    p.x += p.vx * dt; p.y += p.vy * dt;
+    // wrap instead of respawning, so no allocation and no popping in
+    if (p.x < -40) p.x = W + 40; else if (p.x > W + 40) p.x = -40;
+    if (p.y < -40) p.y = H + 40; else if (p.y > H + 40) p.y = -40;
+  }
+}
+
+function renderWorldAtmosphere(g) {
+  if (!atmosCount) return;
+  const cfg = game.theme.atmos;
+  g.save();
+  g.fillStyle = cfg.color;
+  if (atmosKind === "fog" || atmosKind === "steam") {
+    // soft volumes: one alpha, many circles, no gradients per particle
+    g.globalAlpha = cfg.alpha;
+    for (let i = 0; i < atmosCount; i++) {
+      const p = atmos[i];
+      g.beginPath(); g.arc(p.x, p.y, p.r, 0, TAU); g.fill();
+    }
+  } else if (atmosKind === "sand") {
+    g.globalAlpha = cfg.alpha;
+    g.strokeStyle = cfg.color; g.lineWidth = 1.4;
+    g.beginPath();
+    for (let i = 0; i < atmosCount; i++) {
+      const p = atmos[i];
+      g.moveTo(p.x, p.y); g.lineTo(p.x - p.r * 5, p.y - p.vy * 4);
+    }
+    g.stroke();
+  } else {
+    for (let i = 0; i < atmosCount; i++) {
+      const p = atmos[i];
+      g.globalAlpha = p.a;
+      g.beginPath(); g.arc(p.x, p.y, p.r, 0, TAU); g.fill();
+    }
+  }
+  g.restore();
+}
+
+/* ---- lighting: one gradient per frame at most ---- */
+function renderWorldLighting(g) {
+  const th = game.theme;
+  if (!th || !th.light) return;
+  const L = th.light;
+  if (L.flicker) {
+    // cheap deterministic flicker, no per-frame randomness cost
+    const f = Math.sin(game.time / 90) * Math.sin(game.time / 37);
+    if (f > 0.72) { g.fillStyle = "rgba(0,0,0,.18)"; g.fillRect(0, 0, W, H); }
+  }
+  const wash = L.warm || L.moon || L.emergency;
+  if (wash) { g.fillStyle = wash; g.fillRect(0, 0, W, H); }
+  if (L.vignette) {
+    const grd = g.createRadialGradient(W / 2, H / 2, H * 0.45, W / 2, H / 2, H * 0.95);
+    grd.addColorStop(0, "rgba(0,0,0,0)");
+    grd.addColorStop(1, "rgba(0,0,0," + L.vignette.toFixed(2) + ")");
+    g.fillStyle = grd; g.fillRect(0, 0, W, H);
+  }
+}
+
+function renderWorldBackground(g) {
   const t = game.theme;
-  g.fillStyle = t ? t.ground : "#171c14";
-  g.fillRect(0, 0, W, H);
-  g.strokeStyle = t ? t.grid : "rgba(255,255,255,.028)";
-  g.lineWidth = 1;
+  if (!t) {                                   // endless keeps its original look
+    g.fillStyle = "#171c14"; g.fillRect(0, 0, W, H);
+    g.strokeStyle = "rgba(255,255,255,.028)"; g.lineWidth = 1;
+    g.beginPath();
+    for (let x = 0; x <= W; x += 48) { g.moveTo(x, 0); g.lineTo(x, H); }
+    for (let y = 0; y <= H; y += 48) { g.moveTo(0, y); g.lineTo(W, y); }
+    g.stroke();
+    g.strokeStyle = "rgba(125,213,63,.16)"; g.lineWidth = 3;
+    g.strokeRect(1.5, 1.5, W - 3, H - 3);
+    return;
+  }
+  // sky/ground wash, then the cached prop layer, then tint and border
+  const sky = g.createLinearGradient(0, 0, 0, H);
+  sky.addColorStop(0, t.sky ? t.sky[0] : t.ground);
+  sky.addColorStop(1, t.sky ? t.sky[1] : t.ground);
+  g.fillStyle = sky; g.fillRect(0, 0, W, H);
+  g.fillStyle = t.ground; g.fillRect(0, 0, W, H);
+  g.strokeStyle = t.grid; g.lineWidth = 1;
   g.beginPath();
   for (let x = 0; x <= W; x += 48) { g.moveTo(x, 0); g.lineTo(x, H); }
   for (let y = 0; y <= H; y += 48) { g.moveTo(0, y); g.lineTo(W, y); }
   g.stroke();
-  if (t && t.tint) { g.fillStyle = t.tint; g.fillRect(0, 0, W, H); }
-  g.strokeStyle = t ? t.edge : "rgba(125,213,63,.16)";
-  g.lineWidth = 3;
+
+  buildPropLayer();
+  if (propLayer) g.drawImage(propLayer, 0, 0);
+
+  if (t.tint) { g.fillStyle = t.tint; g.fillRect(0, 0, W, H); }
+  g.strokeStyle = t.edge; g.lineWidth = 3;
   g.strokeRect(1.5, 1.5, W - 3, H - 3);
 }
+
+/* kept so any existing call site still resolves */
+function drawGround(g) { renderWorldBackground(g); }
 
 function bar(g, x, y, w, h, pct, fill, back, label) {
   g.fillStyle = back || "rgba(0,0,0,.55)";
@@ -2310,6 +3394,27 @@ function drawHUD(g) {
     g.lineWidth = 2; g.strokeRect(bx + .5, by + .5, bw - 1, bh - 1);
   }
 
+  // boss warning
+  if (game.bossWarnTime > 0 && game.bossPending) {
+    const a = clamp(game.bossWarnTime / 500, 0, 1);
+    const blink = Math.floor(game.bossWarnTime / 220) % 2 === 0;
+    g.save();
+    g.globalAlpha = a * 0.55;
+    g.fillStyle = "#1a0406"; g.fillRect(0, H / 2 - 96, W, 168);
+    g.globalAlpha = a;
+    g.textAlign = "center";
+    g.fillStyle = blink ? "#ff3b3b" : "#7a1418";
+    g.font = "bold 20px 'Courier New', monospace";
+    g.fillText("\u26A0   W A R N I N G   \u26A0", W / 2, H / 2 - 52);
+    g.fillStyle = "#ffd76a";
+    g.font = "bold 46px 'Courier New', monospace";
+    g.fillText(game.bossPending.name, W / 2, H / 2 + 4);
+    g.fillStyle = "#cfd6c9";
+    g.font = "bold 15px 'Courier New', monospace";
+    g.fillText("BOSS INCOMING", W / 2, H / 2 + 34);
+    g.restore();
+  }
+
   // special event announcement
   if (game.eventBannerTime > 0 && game.eventBanner) {
     const a = clamp(game.eventBannerTime / 700, 0, 1);
@@ -2449,6 +3554,9 @@ function render() {
   ctx.restore();
 
   ctx.restore();
+
+  renderWorldAtmosphere(ctx);
+  renderWorldLighting(ctx);
 
   // blackout / night: punch a light around the player out of a dark sheet
   if (game.dark > 0.02) {
