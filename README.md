@@ -150,11 +150,30 @@ still starts simple and reaches the full roster around wave 21.
 
 **Armory** — three guns, plus three limited-charge items.
 
-*Guns* — the shotgun unlocks at wave 3, the rifle at wave 6.
+*Guns* — nine weapons, unlocked across the campaign. Each has a distinct job;
+none is simply a better version of the last.
 
-- **Pistol** — semi-auto, accurate, unlimited reserve ammo
-- **Shotgun** — 7 pellets, heavy knockback, short range
-- **Rifle** — full-auto, high fire rate, burns through ammo
+| Weapon | Role | Unlocks | Key mechanic |
+|---|---|---|---|
+| Pistol | reliable all-rounder | start | infinite reserve |
+| Shotgun | close burst | W1 S3 | 7 pellets, heavy knockback |
+| Rifle | sustained damage | W1 S5 | full-auto |
+| Sniper | precision | W2 S2 | **pierces 3 enemies**, x3 headshots, laser sight |
+| Grenade launcher | area denial | W3 S1 | lobbed shell, 120px blast |
+| Flamethrower | crowd burn | W4 S1 | cone stream + burn that outlasts the flame |
+| Tesla | chain damage | W4 S4 | jumps to 4 targets, 0.78 falloff per jump |
+| Rocket | heavy burst | W5 S3 | 215px blast, 1 in the tube, 10 in reserve |
+| Freeze | crowd control | W6 S1 | freezes for 1.5s; bosses resist (0.24s) |
+
+Player explosives never damage the player. Headshots multiply damage per
+weapon (`headMul`), and bosses cap the bonus so they can't be trivialised.
+
+Weapons are switched with **1-9**, **E/Z** to cycle, or by tapping the slots
+on touch — only unlocked weapons get a slot, and the row wraps.
+
+Ammo comes in two tiers from the existing drop system: a common box for the
+standard guns and a rarer crate for the heavy weapons, both favouring the
+weapon you're holding. Unlocks are permanent and saved.
 
 *Gear* — each has limited charges, shown bottom-right. Charges drop from
 kills and top up between waves (a grenade every wave, a shield every third,

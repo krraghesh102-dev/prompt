@@ -169,7 +169,7 @@
     <div class="keys">
       <div><b>WASD / Arrows</b> — move</div>
       <div><b>Mouse</b> — aim &nbsp;·&nbsp; <b>Click / Hold</b> — shoot</div>
-      <div><b>R</b> — reload &nbsp;·&nbsp; <b>1-3</b> — switch weapon</div>
+      <div><b>R</b> — reload &nbsp;·&nbsp; <b>1-9</b> — pick weapon &nbsp;·&nbsp; <b>E / Z</b> — cycle</div>
       <div><b>Shift</b> — sprint &nbsp;·&nbsp; <b>P / Esc</b> — pause</div>
       <div><b>G</b> — grenade &nbsp;·&nbsp; <b>F</b> — shield &nbsp;·&nbsp; <b>Q</b> — power blast</div>
       <div style="margin-top:8px;color:#7dd53f">ON A PHONE</div>
@@ -353,9 +353,8 @@ addEventListener("keydown", e => {
   if (["arrowup","arrowdown","arrowleft","arrowright"," "].includes(k)) e.preventDefault();
   if (k === "p" || k === "escape") togglePause();
   if (k === "r") player.reload();
-  if (k === "1") player.selectWeapon(0);
-  if (k === "2") player.selectWeapon(1);
-  if (k === "3") player.selectWeapon(2);
+  if (k >= "1" && k <= "9") player.selectWeapon(+k - 1);
+  if (!e.repeat && (k === "e" || k === "z")) player.cycleWeapon(k === "e" ? 1 : -1);
   // holding a key fires keydown repeatedly; one press must mean one use
   if (!e.repeat) {
     if (k === "g") player.useItem("grenade");
@@ -511,6 +510,12 @@ const SFX = {
   shieldOn:() => { blip("sine", 300, 0.18, 0.08, 780); setTimeout(() => blip("sine", 640, 0.22, 0.07, 900), 120); },
   shieldHit:() => blip("sine", 900, 0.10, 0.07, 420),
   shieldOff:() => blip("sine", 620, 0.26, 0.06, 180),
+  sniper:  () => { noise(0.10, 0.20, 3400); blip("square", 160, 0.16, 0.09, 40); },
+  thump:   () => { noise(0.10, 0.14, 700);  blip("sine", 150, 0.12, 0.07, 60); },
+  flame:   () => { if (Math.random() < 0.35) noise(0.10, 0.05, 1500); },
+  zap:     () => { blip("square", 1400, 0.06, 0.05, 300); blip("sawtooth", 700, 0.09, 0.04, 180); },
+  rocket:  () => { noise(0.28, 0.22, 1100); blip("sawtooth", 110, 0.30, 0.11, 45); },
+  frost:   () => blip("sine", 1050, 0.07, 0.045, 620),
   scream:  () => { blip("sawtooth", 620, 0.45, 0.09, 140); noise(0.3, 0.08, 900); },
   magnet:  () => { blip("sine", 520, 0.10, 0.06, 880); setTimeout(() => blip("sine", 880, 0.14, 0.05, 1250), 90); },
   slurp:   () => blip("sine", 700, 0.05, 0.035, 1100),
@@ -635,7 +640,7 @@ const Progress = {
       });
       worlds[w.id] = { unlocked: UNLOCK_ALL || w.id === 1, completed: false, introSeen: false, stages };
     }
-    return { version: 1, worlds, highestWave: 0 };
+    return { version: 1, worlds, highestWave: 0, weapons: ["pistol"] };
   },
   load() {
     try {
@@ -648,7 +653,11 @@ const Progress = {
           return this.data;
         }
       }
-    } catch (e) { /* corrupt or unavailable storage falls through to a fresh save */ }
+    } catch (e) {
+      // genuinely corrupt or unavailable storage falls through to a fresh
+      // save, but never quietly: a silent reset once hid a real bug here
+      try { console.warn("Dead Zone: save could not be read, starting fresh", e); } catch (e2) {}
+    }
     this.data = this.blank();
     this.applyUnlockAll();
     return this.data;
@@ -675,6 +684,17 @@ const Progress = {
       }
     }
     base.highestWave = Math.max(0, saved.highestWave | 0);
+    // unlocked weapons are permanent; keep any the save already had
+    // NB: this runs before the weapon table exists, so it must not touch
+    // WEAPON_INDEX -- doing so threw inside load()'s try/catch and silently
+    // reset the entire save. Unknown ids are inert: equipUnlocked walks
+    // WEAPONS and simply never asks about them.
+    base.weapons = ["pistol"];
+    if (Array.isArray(saved.weapons)) {
+      for (const id of saved.weapons) {
+        if (typeof id === "string" && !base.weapons.includes(id)) base.weapons.push(id);
+      }
+    }
     return base;
   },
   /* Opens everything while UNLOCK_ALL is set. Only the `unlocked` flags are
@@ -698,7 +718,14 @@ const Progress = {
     return Object.values(w.stages).reduce((a, s) => a + s.stars, 0);
   },
   totalStars() { return WORLDS.reduce((a, w) => a + this.worldStars(w.id), 0); },
-  reset() { this.data = this.blank(); this.applyUnlockAll(); this.save(); }
+  reset() { this.data = this.blank(); this.applyUnlockAll(); this.save(); },
+  hasWeapon(id) { return (this.data.weapons || []).includes(id); },
+  unlockWeapon(id) {
+    if (this.hasWeapon(id)) return false;
+    this.data.weapons.push(id);
+    this.save();
+    return true;
+  }
 };
 Progress.load();
 
@@ -1316,13 +1343,90 @@ function noteFirstSighting(type) {
 }
 
 /* ---------------- weapons ---------------- */
+const HEADSHOT_MULTIPLIER = 2.0;      // base; per-weapon `headMul` overrides
+
+/* Every weapon is one row here. `mode` picks the firing behaviour from
+   FIRE_MODES, so a new weapon is a row plus (only if it needs one) a new
+   mode -- nothing else in the game changes. Fields left out fall back to
+   sensible defaults in the fire code. */
 const WEAPONS = [
-  { name: "PISTOL",  short: "PSTL", dmg: 26, rof: 210, mag: 12, reload: 900,  spread: 0.035, speed: 14, pellets: 1, auto: false,
-    reserveMax: Infinity, sfx: "shot",    knock: 3,  color: "#ffd76a", tracer: 1.0 },
-  { name: "SHOTGUN", short: "SHTG", dmg: 17, rof: 720, mag: 6,  reload: 1500, spread: 0.20,  speed: 12, pellets: 7, auto: false,
-    reserveMax: 48, sfx: "shotgun", knock: 6,  color: "#ff9a3c", tracer: 1.4 },
-  { name: "RIFLE",   short: "RIFL", dmg: 15, rof: 85,  mag: 32, reload: 1300, spread: 0.075, speed: 17, pellets: 1, auto: true,
-    reserveMax: 210, sfx: "rifle",   knock: 2,  color: "#8ee8ff", tracer: 0.8 }
+  { id: "pistol", name: "PISTOL", short: "PSTL", mode: "hitscan",
+    dmg: 26, rof: 210, mag: 12, reload: 900, spread: 0.035, speed: 14, pellets: 1, auto: false,
+    reserveMax: Infinity, pickup: 0, sfx: "shot", knock: 3, color: "#ffd76a", tracer: 1.0,
+    headMul: 2.0, shake: 2.2, recoil: 4,
+    role: "reliable all-rounder" },
+
+  { id: "shotgun", name: "SHOTGUN", short: "SHTG", mode: "hitscan",
+    dmg: 17, rof: 720, mag: 6, reload: 1500, spread: 0.20, speed: 12, pellets: 7, auto: false,
+    reserveMax: 48, pickup: 8, sfx: "shotgun", knock: 6, color: "#ff9a3c", tracer: 1.4,
+    headMul: 1.5, shake: 6, recoil: 7,
+    role: "close-range burst and knockback" },
+
+  { id: "rifle", name: "RIFLE", short: "RIFL", mode: "hitscan",
+    dmg: 15, rof: 85, mag: 32, reload: 1300, spread: 0.075, speed: 17, pellets: 1, auto: true,
+    reserveMax: 210, pickup: 40, sfx: "rifle", knock: 2, color: "#8ee8ff", tracer: 0.8,
+    headMul: 2.0, shake: 2.2, recoil: 4,
+    role: "sustained damage" },
+
+  /* pierces a line of enemies; the payoff for precision */
+  { id: "sniper", name: "SNIPER", short: "SNPR", mode: "hitscan",
+    dmg: 150, rof: 1150, mag: 5, reload: 2000, spread: 0.004, speed: 30, pellets: 1, auto: false,
+    reserveMax: 30, pickup: 5, heavy: true, sfx: "sniper", knock: 10, color: "#e8f4ff", tracer: 2.6,
+    headMul: 3.0, pierce: 3, shake: 7, recoil: 9, laser: true,
+    role: "single-target precision" },
+
+  /* lobbed shell, modest blast, fires often enough to zone a crowd */
+  { id: "glauncher", name: "GRENADE LR", short: "GREN", mode: "projectile",
+    dmg: 0, rof: 900, mag: 4, reload: 1900, spread: 0.03, speed: 11, pellets: 1, auto: false,
+    reserveMax: 24, pickup: 4, heavy: true, sfx: "thump", knock: 0, color: "#9ad34f", tracer: 0,
+    projectile: { kind: "shell", radius: 120, blast: 95, knock: 14, life: 1200, grav: 0.992, color: "#9ad34f" },
+    shake: 5, recoil: 8,
+    role: "area denial" },
+
+  /* short cone, continuous, sets enemies alight */
+  { id: "flamer", name: "FLAMER", short: "FLAM", mode: "stream",
+    dmg: 5.5, rof: 45, mag: 120, reload: 1900, spread: 0.30, speed: 0, pellets: 1, auto: true,
+    reserveMax: 400, pickup: 90, sfx: "flame", knock: 0.6, color: "#ff8a2b", tracer: 0,
+    range: 165, burn: { dps: 11, dur: 2200 }, shake: 0.5, recoil: 1,
+    role: "crowd burn" },
+
+  /* one shot, several targets -- rewards fighting packed groups */
+  { id: "tesla", name: "TESLA", short: "TSLA", mode: "chain",
+    dmg: 34, rof: 420, mag: 14, reload: 1600, spread: 0, speed: 0, pellets: 1, auto: true,
+    reserveMax: 90, pickup: 14, heavy: true, sfx: "zap", knock: 1.5, color: "#7de3ff", tracer: 0,
+    range: 300, chain: 4, chainRange: 150, chainFalloff: 0.78, shake: 2, recoil: 3,
+    role: "chain damage through packs" },
+
+  /* slow, rare, enormous -- the answer to a tank */
+  { id: "rocket", name: "ROCKET", short: "RCKT", mode: "projectile",
+    dmg: 0, rof: 1500, mag: 1, reload: 2400, spread: 0.01, speed: 6.2, pellets: 1, auto: false,
+    reserveMax: 10, pickup: 2, heavy: true, sfx: "rocket", knock: 0, color: "#ff6b4a", tracer: 0,
+    projectile: { kind: "rocket", radius: 215, blast: 320, knock: 30, life: 2200, grav: 1, color: "#ff6b4a", trail: true },
+    shake: 12, recoil: 12,
+    role: "heavy single burst" },
+
+  /* low damage, but it stops a rush dead */
+  { id: "freeze", name: "FREEZE", short: "FRZE", mode: "hitscan",
+    dmg: 12, rof: 130, mag: 40, reload: 1700, spread: 0.09, speed: 13, pellets: 1, auto: true,
+    reserveMax: 160, pickup: 35, heavy: true, sfx: "frost", knock: 0.5, color: "#9fe8ff", tracer: 1.2,
+    headMul: 1.0, freeze: { dur: 1500, bossDur: 240, slow: 0.18 }, shake: 0.8, recoil: 2,
+    role: "crowd control" }
+];
+const WEAPON_INDEX = {};
+WEAPONS.forEach((w, i) => { WEAPON_INDEX[w.id] = i; });
+
+/* Campaign unlock schedule, by (world, stage). Weapons arrive alongside the
+   threat they answer: the sniper as brutes get common, the launcher as
+   groups grow, the rocket when tanks appear. */
+const WEAPON_UNLOCKS = [
+  { id: "shotgun",   world: 1, stage: 3 },
+  { id: "rifle",     world: 1, stage: 5 },
+  { id: "sniper",    world: 2, stage: 2 },
+  { id: "glauncher", world: 3, stage: 1 },
+  { id: "flamer",    world: 4, stage: 1 },
+  { id: "tesla",     world: 4, stage: 4 },
+  { id: "rocket",    world: 5, stage: 3 },
+  { id: "freeze",    world: 6, stage: 1 }
 ];
 
 
@@ -2035,6 +2139,174 @@ function abilityLockFrac(kind) {
   return 0;
 }
 
+
+/* ================= FIRING MODES =================
+   One function per mechanic. tryShoot() only picks the mode and pays the
+   ammo, so weapons stay data rows rather than special cases. */
+let projectiles = [];      // launcher shells and rockets
+let flames = [];           // short-lived flame puffs
+let arcs = [];             // tesla lightning, drawn then discarded
+
+class Projectile {
+  constructor(x, y, vx, vy, cfg, weapon) {
+    this.x = x; this.y = y; this.vx = vx; this.vy = vy;
+    this.cfg = cfg; this.weapon = weapon;
+    this.life = cfg.life; this.dead = false; this.spin = 0;
+  }
+  update(dt) {
+    this.x += this.vx * dt; this.y += this.vy * dt;
+    if (this.cfg.grav < 1) { this.vx *= Math.pow(this.cfg.grav, dt); this.vy *= Math.pow(this.cfg.grav, dt); }
+    this.spin += 0.35 * dt;
+    this.life -= 16.6 * dt;
+    if (this.cfg.trail && Math.random() < 0.85) {
+      particles.push(new Particle(this.x, this.y, rand(-.5,.5), rand(-.5,.5), rand(2, 4),
+        pick(["#ffb648", "#ff7a18", "#8a8a8a"]), 320));
+    }
+    // detonate on contact with any live enemy
+    for (const z of zombies) {
+      if (z.dead) continue;
+      if (dist2(this.x, this.y, z.x, z.y) < (z.r + 7) * (z.r + 7)) { this.boom(); return; }
+    }
+    if (this.x < 6 || this.x > W - 6 || this.y < 6 || this.y > H - 6) { this.boom(); return; }
+    if (this.life <= 0) this.boom();
+  }
+  boom() {
+    if (this.dead) return;
+    this.dead = true;
+    const c = this.cfg;
+    // selfSafe: player-fired explosives never hurt the player
+    explode(this.x, this.y, c.radius, c.blast, c.knock, c.color, true);
+    SFX.boom();
+    game.shake = Math.min(30, game.shake + (c.radius > 180 ? 22 : 12));
+  }
+  draw(g) {
+    g.save(); g.translate(this.x, this.y); g.rotate(this.cfg.kind === "rocket" ? Math.atan2(this.vy, this.vx) : this.spin);
+    if (this.cfg.kind === "rocket") {
+      g.fillStyle = "#c8ccc4"; g.fillRect(-9, -4, 18, 8);
+      g.fillStyle = "#ff6b4a"; g.beginPath();
+      g.moveTo(9, -4); g.lineTo(16, 0); g.lineTo(9, 4); g.closePath(); g.fill();
+      g.fillStyle = "#6b7280"; g.fillRect(-11, -6, 4, 12);
+    } else {
+      g.fillStyle = "#5a6b33"; g.beginPath(); g.arc(0, 0, 6, 0, TAU); g.fill();
+      g.strokeStyle = "#9ad34f"; g.lineWidth = 2; g.stroke();
+      g.fillStyle = "#9ad34f"; g.fillRect(-1.5, -8, 3, 4);
+    }
+    g.restore();
+  }
+}
+
+/* Shared damage application so every mode gets headshots and status alike. */
+function damageEnemy(z, dmg, kx, ky, weapon, hitX, hitY) {
+  let out = dmg;
+  if (weapon && weapon.headMul && hitX !== undefined) {
+    const hx = z.x + Math.cos(z.angle) * z.r * 0.45;
+    const hy = z.y + Math.sin(z.angle) * z.r * 0.45;
+    const hr = z.r * 0.34;
+    if (dist2(hitX, hitY, hx, hy) < hr * hr) {
+      out *= z.isBoss ? Math.min(1.4, weapon.headMul) : weapon.headMul;   // bosses resist
+      game.headshots++;
+      floats.push(new FloatText(z.x, z.y - z.r - 6, "HEAD", "#ffd76a", false));
+    }
+  }
+  if (weapon && weapon.burn) z.applyBurn(weapon.burn.dps, weapon.burn.dur);
+  if (weapon && weapon.freeze) z.applyFreeze(weapon.freeze);
+  z.hurt(out, kx, ky);
+  return out;
+}
+
+const FIRE_MODES = {
+  /* pistol, shotgun, rifle, sniper, freeze: bullets, optionally piercing */
+  hitscan(p, w, base) {
+    game.shotsFired += w.pellets;
+    const muzzle = p.r + 10;
+    for (let i = 0; i < w.pellets; i++) {
+      const a = base + rand(-w.spread, w.spread);
+      const b = new Bullet(
+        p.x + Math.cos(base) * muzzle, p.y + Math.sin(base) * muzzle,
+        Math.cos(a) * w.speed, Math.sin(a) * w.speed,
+        w.dmg, w.knock, w.color, w.tracer);
+      b.weapon = w;
+      b.pierce = w.pierce || 0;
+      bullets.push(b);
+    }
+  },
+
+  /* grenade launcher and rocket: a real travelling object */
+  projectile(p, w, base) {
+    game.shotsFired += 1;
+    const a = base + rand(-w.spread, w.spread);
+    const muzzle = p.r + 14;
+    projectiles.push(new Projectile(
+      p.x + Math.cos(base) * muzzle, p.y + Math.sin(base) * muzzle,
+      Math.cos(a) * w.speed, Math.sin(a) * w.speed, w.projectile, w));
+  },
+
+  /* flamethrower: a cone of short-lived puffs that damage what they touch */
+  stream(p, w, base) {
+    game.shotsFired += 1;
+    const muzzle = p.r + 8;
+    for (let i = 0; i < 3; i++) {
+      const a = base + rand(-w.spread, w.spread);
+      const sp = rand(5, 8);
+      flames.push({ x: p.x + Math.cos(base) * muzzle, y: p.y + Math.sin(base) * muzzle,
+                    vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
+                    life: (w.range / sp) * 16.6, max: (w.range / sp) * 16.6, r: 6, dead: false });
+    }
+    // damage is applied by the cone test, not per puff, so it stays cheap
+    const r2 = w.range * w.range;
+    for (const z of zombies) {
+      if (z.dead) continue;
+      const dx = z.x - p.x, dy = z.y - p.y;
+      const d2 = dx * dx + dy * dy;
+      if (d2 > r2) continue;
+      const d = Math.sqrt(d2) || 1;
+      const dot = (dx / d) * Math.cos(base) + (dy / d) * Math.sin(base);
+      if (dot < Math.cos(w.spread * 2.2)) continue;          // outside the cone
+      damageEnemy(z, w.dmg, (dx / d) * w.knock, (dy / d) * w.knock, w);
+      game.shotsHit++;
+    }
+  },
+
+  /* tesla: hit the first target along the aim, then jump outward */
+  chain(p, w, base) {
+    game.shotsFired += 1;
+    // nearest enemy roughly along the aim line
+    let first = null, bestScore = Infinity;
+    for (const z of zombies) {
+      if (z.dead) continue;
+      const dx = z.x - p.x, dy = z.y - p.y;
+      const d = Math.hypot(dx, dy);
+      if (d > w.range) continue;
+      const dot = (dx / d) * Math.cos(base) + (dy / d) * Math.sin(base);
+      if (dot < 0.55) continue;                              // must be in front
+      const score = d * (2 - dot);
+      if (score < bestScore) { bestScore = score; first = z; }
+    }
+    if (!first) {                                            // fizzle, still visible
+      arcs.push({ pts: [[p.x, p.y], [p.x + Math.cos(base) * 90, p.y + Math.sin(base) * 90]], life: 90, max: 90 });
+      return;
+    }
+    const hitSet = new Set();
+    const pts = [[p.x, p.y]];
+    let node = first, dmg = w.dmg;
+    for (let i = 0; i < w.chain && node; i++) {
+      hitSet.add(node);                                      // never the same target twice
+      pts.push([node.x, node.y]);
+      damageEnemy(node, dmg, 0, 0, w);
+      game.shotsHit++;
+      dmg *= w.chainFalloff;
+      let next = null, bestD = w.chainRange;
+      for (const z of zombies) {
+        if (z.dead || hitSet.has(z)) continue;
+        const d = Math.hypot(z.x - node.x, z.y - node.y);
+        if (d < bestD) { bestD = d; next = z; }
+      }
+      node = next;
+    }
+    arcs.push({ pts, life: 140, max: 140 });
+  }
+};
+
 /* ---------------- entities ---------------- */
 class Player {
   constructor() { this.reset(); }
@@ -2044,10 +2316,10 @@ class Player {
     this.hp = 100; this.maxHp = 100;
     this.speed = 3.05;
     this.angle = 0;
-    this.unlocked = [true, false, false];
+    this.unlocked = WEAPONS.map((_, i) => i === 0);
     this.wi = 0;
-    this.ammo = [WEAPONS[0].mag, 0, 0];
-    this.reserve = [Infinity, 0, 0];
+    this.ammo = WEAPONS.map((w, i) => (i === 0 ? w.mag : 0));
+    this.reserve = WEAPONS.map((w, i) => (i === 0 ? Infinity : 0));
     this.lastShot = 0;
     this.reloading = false; this.reloadEnd = 0;
     this.invuln = 0;
@@ -2068,6 +2340,16 @@ class Player {
     this.wi = i; this.reloading = false;
     SFX.reload();
   }
+  /* Steps to the next unlocked weapon. Nine number keys is a lot, so a
+     cycle key keeps the keyboard practical. */
+  cycleWeapon(dir) {
+    if (game.state !== "play") return;
+    for (let n = 1; n <= WEAPONS.length; n++) {
+      const i = (this.wi + dir * n + WEAPONS.length * 2) % WEAPONS.length;
+      if (this.unlocked[i]) { this.selectWeapon(i); return; }
+    }
+  }
+
   reload() {
     if (game.state !== "play") return;
     const w = this.weapon;
@@ -2081,30 +2363,23 @@ class Player {
     if (this.reloading || game.time - this.lastShot < w.rof) return;
     if (this.ammo[this.wi] <= 0) { SFX.empty(); this.reload(); return; }
     this.lastShot = game.time;
-    this.ammo[this.wi]--;
+    this.ammo[this.wi]--;                       // exactly one round per shot
     const base = this.angle;
-    game.shotsFired += w.pellets;
-    for (let i = 0; i < w.pellets; i++) {
-      const a = base + rand(-w.spread, w.spread);
-      const muzzle = this.r + 10;
-      bullets.push(new Bullet(
-        this.x + Math.cos(base) * muzzle, this.y + Math.sin(base) * muzzle,
-        Math.cos(a) * w.speed, Math.sin(a) * w.speed,
-        w.dmg, w.knock, w.color, w.tracer
-      ));
-    }
-    this.recoil = w.pellets > 1 ? 7 : 4;
-    game.shake = Math.min(12, game.shake + (w.pellets > 1 ? 6 : 2.2));
-    // muzzle flash + smoke
-    for (let i = 0; i < (w.pellets > 1 ? 12 : 5); i++) {
+
+    (FIRE_MODES[w.mode] || FIRE_MODES.hitscan)(this, w, base);
+
+    this.recoil = w.recoil !== undefined ? w.recoil : 4;
+    game.shake = Math.min(14, game.shake + (w.shake !== undefined ? w.shake : 2.2));
+    const flashN = w.mode === "stream" ? 2 : (w.pellets > 1 ? 12 : 5);
+    for (let i = 0; i < flashN; i++) {
       const a = base + rand(-0.35, 0.35);
       particles.push(new Particle(
         this.x + Math.cos(base) * (this.r + 12), this.y + Math.sin(base) * (this.r + 12),
         Math.cos(a) * rand(2, 7), Math.sin(a) * rand(2, 7),
-        rand(2, 4), pick(["#fff3b0", "#ffb648", "#ff7a18"]), 220
+        rand(2, 4), pick(w.mode === "stream" ? ["#ff8a2b", "#ffd05a"] : ["#fff3b0", "#ffb648", "#ff7a18"]), 220
       ));
     }
-    SFX[w.sfx]();
+    if (SFX[w.sfx]) SFX[w.sfx]();
     if (this.ammo[this.wi] === 0) this.reload();
   }
   /* The single activation path for grenade / shield / blast. Every input
@@ -2252,8 +2527,14 @@ class Player {
     // gun
     const w = this.weapon;
     g.fillStyle = "#20241d";
-    if (w.name === "SHOTGUN") { g.fillRect(6, -3.5, 22, 7); g.fillStyle = "#4a3a22"; g.fillRect(2, -3, 8, 6); }
-    else if (w.name === "RIFLE") { g.fillRect(6, -3, 26, 6); g.fillStyle = "#3a3f33"; g.fillRect(10, 2, 7, 6); }
+    if (w.id === "shotgun") { g.fillRect(6, -3.5, 22, 7); g.fillStyle = "#4a3a22"; g.fillRect(2, -3, 8, 6); }
+    else if (w.id === "rifle") { g.fillRect(6, -3, 26, 6); g.fillStyle = "#3a3f33"; g.fillRect(10, 2, 7, 6); }
+    else if (w.id === "sniper") { g.fillRect(6, -2.5, 36, 5); g.fillStyle = "#3a3f33"; g.fillRect(14, -7, 12, 4); }
+    else if (w.id === "glauncher") { g.fillRect(6, -5, 20, 10); g.fillStyle = "#5a6b33"; g.fillRect(24, -4, 8, 8); }
+    else if (w.id === "rocket") { g.fillRect(2, -5.5, 32, 11); g.fillStyle = "#ff6b4a"; g.fillRect(30, -3, 8, 6); }
+    else if (w.id === "flamer") { g.fillRect(6, -3, 20, 6); g.fillStyle = "#7a2b1a"; g.fillRect(-2, -6, 9, 12); }
+    else if (w.id === "tesla") { g.fillRect(6, -3, 20, 6); g.fillStyle = "#7de3ff"; g.fillRect(24, -5, 5, 10); }
+    else if (w.id === "freeze") { g.fillRect(6, -3, 22, 6); g.fillStyle = "#9fe8ff"; g.fillRect(26, -4, 6, 8); }
     else { g.fillRect(6, -2.5, 14, 5); }
     // head
     g.fillStyle = "#d9b48f";
@@ -2333,6 +2614,8 @@ class Zombie {
     this.guard = rand(0, TAU);      // shieldz: facing of the shield, lags the body
     this.nextCall = game.time + rand(2200, 4200);   // screamer
     this.warnUntil = 0;
+    this.burnUntil = 0; this.burnDps = 0; this.burnTick = 0;   // flamethrower
+    this.frozenUntil = 0;                                       // freeze gun
   }
   hurt(n, kx, ky) {
     // a shield zombie soaks hits that land on its guard; flank it instead
@@ -2388,7 +2671,8 @@ class Zombie {
     }
     const roll = Math.random();
     if (roll < 0.09) pickups.push(new Pickup(this.x, this.y, "health"));
-    else if (roll < 0.25) pickups.push(new Pickup(this.x, this.y, "ammo"));
+    else if (roll < 0.22) pickups.push(new Pickup(this.x, this.y, "ammo"));
+    else if (roll < 0.25) pickups.push(new Pickup(this.x, this.y, "ammoHeavy"));
     else if (roll < 0.32) pickups.push(new Pickup(this.x, this.y, "grenade"));
     else if (roll < 0.355) pickups.push(new Pickup(this.x, this.y, "shield"));
     else if (roll < 0.375) pickups.push(new Pickup(this.x, this.y, "blast"));
@@ -2443,10 +2727,47 @@ class Zombie {
     return false;
   }
 
+  get frozen() { return game.time < this.frozenUntil; }
+
+  applyBurn(dps, dur) {
+    // refreshes rather than stacks, so standing in flame is not exponential
+    this.burnDps = Math.max(this.burnDps, dps);
+    this.burnUntil = Math.max(this.burnUntil, game.time + dur);
+  }
+  applyFreeze(cfg) {
+    const dur = this.isBoss ? cfg.bossDur : cfg.dur;    // bosses resist heavily
+    this.frozenUntil = Math.max(this.frozenUntil, game.time + dur);
+  }
+
   update(dt) {
     const dx = player.x - this.x, dy = player.y - this.y;
     const d = Math.hypot(dx, dy) || 1;
     this.angle = Math.atan2(dy, dx);
+
+    // burning ticks a few times a second rather than every frame
+    if (game.time < this.burnUntil) {
+      if (game.time > this.burnTick) {
+        this.burnTick = game.time + 250;
+        this.hp -= this.burnDps * 0.25;
+        if (Math.random() < 0.6) {
+          particles.push(new Particle(this.x + rand(-this.r, this.r), this.y + rand(-this.r, this.r),
+            rand(-0.4, 0.4), rand(-1.4, -0.4), rand(1.5, 3), pick(["#ff8a2b", "#ffd05a", "#ff4d18"]), 420));
+        }
+        if (this.hp <= 0 && !this.dead) { this.die(); return; }
+      }
+    } else if (this.burnDps) this.burnDps = 0;
+
+    // frozen: holds position and cannot attack, but still takes hits
+    if (this.frozen) {
+      this.vx *= Math.pow(0.7, dt); this.vy *= Math.pow(0.7, dt);
+      this.kx *= Math.pow(0.88, dt); this.ky *= Math.pow(0.88, dt);
+      this.x += this.kx * dt; this.y += this.ky * dt;
+      this.x = clamp(this.x, this.r, W - this.r);
+      this.y = clamp(this.y, this.r, H - this.r);
+      if (this.flash > 0) this.flash -= 16.6 * dt;
+      return;
+    }
+
     this.special(dt, d);
 
     let mvx = dx / d, mvy = dy / d;
@@ -2548,6 +2869,29 @@ class Zombie {
     }
     g.restore();
 
+    if (this.frozen) {                       // ice shell
+      g.save();
+      g.globalAlpha = 0.55;
+      g.fillStyle = "#bfe9ff";
+      g.beginPath(); g.arc(this.x, this.y, this.r * 1.12, 0, TAU); g.fill();
+      g.globalAlpha = 0.9; g.strokeStyle = "#eafaff"; g.lineWidth = 2;
+      g.beginPath(); g.arc(this.x, this.y, this.r * 1.12, 0, TAU); g.stroke();
+      g.globalAlpha = 0.8;
+      for (let i = 0; i < 3; i++) {           // frost shards
+        const a = this.phase + i * TAU / 3;
+        g.beginPath();
+        g.moveTo(this.x + Math.cos(a) * this.r * 0.5, this.y + Math.sin(a) * this.r * 0.5);
+        g.lineTo(this.x + Math.cos(a) * this.r * 1.35, this.y + Math.sin(a) * this.r * 1.35);
+        g.stroke();
+      }
+      g.restore();
+    } else if (game.time < this.burnUntil) {  // ember glow
+      g.save();
+      g.globalAlpha = 0.30 + Math.sin(game.time / 70) * 0.12;
+      g.fillStyle = "#ff7a18";
+      g.beginPath(); g.arc(this.x, this.y, this.r * 1.15, 0, TAU); g.fill();
+      g.restore();
+    }
     if (ghost < 1) g.globalAlpha = 1;
     // hp bar for tanky ones
     if (this.hp < this.maxHp && (this.type === "brute" || this.maxHp > 60)) {
@@ -2831,15 +3175,23 @@ class Pickup {
         player.hp = Math.min(player.maxHp, player.hp + 25);
         game.toast("+25 HP", "#6ee36e");
       } else {
+        // one pickup, two tiers: the common box tops up standard guns, the
+        // rarer crate feeds the heavy weapons. The equipped gun gets priority.
+        const heavyOnly = this.kind === "ammoHeavy";
         let given = false;
-        for (let i = 1; i < 3; i++) {
-          if (player.unlocked[i] && player.reserve[i] < WEAPONS[i].reserveMax) {
-            const amt = i === 1 ? 8 : 40;
-            player.reserve[i] = Math.min(WEAPONS[i].reserveMax, player.reserve[i] + amt);
-            given = true;
-          }
-        }
-        game.toast(given ? "+AMMO" : "+50 PTS", "#ffd76a");
+        const fill = (i, mul) => {
+          const w = WEAPONS[i];
+          if (!player.unlocked[i] || !w.pickup || w.reserveMax === Infinity) return;
+          if (heavyOnly && !w.heavy) return;
+          if (!heavyOnly && w.heavy) return;
+          if (player.reserve[i] >= w.reserveMax) return;
+          player.reserve[i] = Math.min(w.reserveMax, player.reserve[i] + Math.max(1, Math.round(w.pickup * mul)));
+          given = true;
+        };
+        fill(player.wi, 1);                                  // what you are holding
+        for (let i = 1; i < WEAPONS.length; i++) if (i !== player.wi) fill(i, 0.5);
+        game.toast(given ? (heavyOnly ? "+HEAVY AMMO" : "+AMMO") : "+50 PTS",
+                   heavyOnly ? "#ff9a3c" : "#ffd76a");
         if (!given) game.addScore(50, this.x, this.y, false);
       }
       SFX.pickup();
@@ -2897,6 +3249,12 @@ class Pickup {
       g.fillStyle = "#0e1a0e"; g.fillRect(-9, -9, 18, 18);
       g.strokeStyle = "#6ee36e"; g.lineWidth = 2; g.strokeRect(-9, -9, 18, 18);
       g.fillStyle = "#6ee36e"; g.fillRect(-6, -2, 12, 4); g.fillRect(-2, -6, 4, 12);
+    } else if (this.kind === "ammoHeavy") {
+      g.fillStyle = "#1d1208"; g.fillRect(-11, -8, 22, 16);
+      g.strokeStyle = "#ff9a3c"; g.lineWidth = 2; g.strokeRect(-11, -8, 22, 16);
+      g.fillStyle = "#ff9a3c";
+      g.fillRect(-7, -4, 4, 9); g.fillRect(-1, -4, 4, 9); g.fillRect(5, -4, 4, 9);
+      g.fillRect(-8, -8, 16, 2);
     } else {
       g.fillStyle = "#1a160a"; g.fillRect(-10, -7, 20, 14);
       g.strokeStyle = "#ffd76a"; g.lineWidth = 2; g.strokeRect(-10, -7, 20, 14);
@@ -2939,6 +3297,7 @@ const game = {
   boss: null, eventBanner: null, eventBannerTime: 0,
   bossPending: null, bossWarnTime: 0, introWorld: null,
   newEnemy: null, newEnemyTime: 0,
+  newWeapon: null, newWeaponTime: 0,
   time: 0,
   score: 0, kills: 0,
   shotsFired: 0, shotsHit: 0, headshots: 0, maxCombo: 0,
@@ -2952,6 +3311,7 @@ const game = {
   reset() {
     bullets = []; zombies = []; particles = []; pickups = []; floats = []; decals = []; spits = [];
     grenades = []; shockwaves = [];
+    projectiles = []; flames = []; arcs = [];
     player.reset();
     this.score = 0; this.kills = 0; this.wave = 0;
     this.shotsFired = 0; this.shotsHit = 0; this.headshots = 0; this.maxCombo = 0;
@@ -3038,16 +3398,36 @@ const game = {
 
   /* Campaign hands out the guns on a stage schedule rather than the endless
      wave numbers, so an early stage never starts you empty-handed. */
+  /* Equip everything the save says is unlocked, then unlock anything this
+     stage newly reaches. Unlocks are permanent and survive replays. */
   grantCampaignWeapons() {
-    const give = (i, reserve) => {
-      if (player.unlocked[i]) return;
-      player.unlocked[i] = true;
-      player.ammo[i] = WEAPONS[i].mag;
-      player.reserve[i] = reserve;
-    };
-    const rank = (this.cw - 1) * 5 + this.cs;   // 1..30 across the campaign
-    if (rank >= 3) give(1, 24);
-    if (rank >= 5) give(2, 120);
+    const rank = (w, s2) => (w - 1) * 5 + s2;
+    const here = rank(this.cw, this.cs);
+    const fresh = [];
+    for (const u of WEAPON_UNLOCKS) {
+      if (here >= rank(u.world, u.stage) && Progress.unlockWeapon(u.id)) fresh.push(u.id);
+    }
+    this.equipUnlocked();
+    if (fresh.length) {
+      const w = WEAPONS[WEAPON_INDEX[fresh[fresh.length - 1]]];
+      this.newWeapon = w.name; this.newWeaponTime = 3000;
+    }
+  },
+
+  /* Mirrors the saved unlock list onto the player and fills a starting
+     reserve for anything newly carried. Used by campaign and endless alike. */
+  equipUnlocked() {
+    for (let i = 0; i < WEAPONS.length; i++) {
+      const w = WEAPONS[i];
+      const has = i === 0 || Progress.hasWeapon(w.id);
+      if (!has) continue;
+      if (!player.unlocked[i]) {
+        player.unlocked[i] = true;
+        player.ammo[i] = w.mag;
+        player.reserve[i] = w.reserveMax === Infinity ? Infinity
+          : Math.max(player.reserve[i] || 0, Math.round(w.reserveMax * 0.5));
+      }
+    }
   },
 
   startStage(worldId, stageNo) {
@@ -3477,6 +3857,7 @@ function startEndless() {
   game.theme = null; game.diff = 1;
   invalidatePropLayer(); seedAtmos();
   game.reset();
+  game.equipUnlocked();          // endless uses whatever campaign has earned
   game.state = "play";
   hideAllScreens();
   checkOrientation();
@@ -3544,15 +3925,18 @@ function collide() {
         if (dist2(sx, sy, z.x, z.y) < rr) { hit = true; hx = sx; hy = sy; break; }
       }
       if (hit) {
-        const nx = b.vx / (Math.hypot(b.vx, b.vy) || 1), ny = b.vy / (Math.hypot(b.vx, b.vy) || 1);
+        if (b.hitSet && b.hitSet.has(z)) continue;      // a piercing round hits each once
+        const m = Math.hypot(b.vx, b.vy) || 1;
+        const nx = b.vx / m, ny = b.vy / m;
         game.shotsHit++;
-        // the head is drawn at r*0.45 along the facing -- measure against it
-        // so the stat reflects a real hit location, not an invented number
-        const headX = z.x + Math.cos(z.angle) * z.r * 0.45;
-        const headY = z.y + Math.sin(z.angle) * z.r * 0.45;
-        const hr = z.r * 0.52;
-        if (dist2(hx, hy, headX, headY) < hr * hr) game.headshots++;
-        z.hurt(b.dmg, nx * b.knock, ny * b.knock);
+        damageEnemy(z, b.dmg, nx * b.knock, ny * b.knock, b.weapon, hx, hy);
+        if (b.pierce > 0) {
+          b.pierce--;
+          if (!b.hitSet) b.hitSet = new Set();
+          b.hitSet.add(z);
+          b.dmg *= 0.8;                                  // each body bleeds it a little
+          continue;                                      // keep travelling
+        }
         b.dead = true;
         break;
       }
@@ -3598,6 +3982,13 @@ function update(dt) {
   for (const p of pickups) p.update(dt);
   for (const f of floats) f.update(dt);
   for (const g of grenades) g.update(dt);
+  for (const pr of projectiles) pr.update(dt);
+  for (const f of flames) {
+    f.x += f.vx * dt; f.y += f.vy * dt;
+    f.vx *= Math.pow(0.90, dt); f.vy *= Math.pow(0.90, dt);
+    f.life -= 16.6 * dt; if (f.life <= 0) f.dead = true;
+  }
+  for (const a of arcs) { a.life -= 16.6 * dt; if (a.life <= 0) a.dead = true; }
   for (const w of shockwaves) w.update(dt);
   for (const s of spits) {
     s.x += s.vx * dt; s.y += s.vy * dt; s.life -= 16.6 * dt;
@@ -3614,6 +4005,9 @@ function update(dt) {
   floats = floats.filter(o => !o.dead);
   spits = spits.filter(o => !o.dead);
   grenades = grenades.filter(o => !o.dead);
+  projectiles = projectiles.filter(o => !o.dead);
+  flames = flames.filter(o => !o.dead);
+  arcs = arcs.filter(o => !o.dead);
   shockwaves = shockwaves.filter(o => !o.dead);
 
   // combo decay
@@ -3647,6 +4041,7 @@ function update(dt) {
   if (game.eventBannerTime > 0) game.eventBannerTime -= 16.6 * dt;
   updateAtmos(dt);
   if (game.newEnemyTime > 0) game.newEnemyTime -= 16.6 * dt;
+  if (game.newWeaponTime > 0) game.newWeaponTime -= 16.6 * dt;
   if (game.bossWarnTime > 0) {
     game.bossWarnTime -= 16.6 * dt;
     if (game.bossWarnTime <= 0 && game.bossPending) {
@@ -3831,29 +4226,40 @@ function drawHUD(g) {
     g.fillText("RELOADING", 142, 114);
   }
 
-  // weapon slots (+ reload / pause on touch) — also the tap targets
+  // weapon slots (+ reload / pause on touch) — also the tap targets.
+  // Only unlocked weapons get a slot, and they wrap so nine still fit.
   uiButtons.length = 0;
-  const bw = TOUCH_UI ? 62 : 42, bh = TOUCH_UI ? 44 : 30, gap = TOUCH_UI ? 8 : 6;
-  for (let i = 0; i < 3; i++) {
-    const bx = 16 + i * (bw + gap), by = 124;
-    if (player.unlocked[i]) uiButtons.push({ x: bx, y: by, w: bw, h: bh, id: "w" + i });
-    g.globalAlpha = player.unlocked[i] ? 1 : 0.25;
-    g.fillStyle = i === player.wi ? "rgba(125,213,63,.22)" : "rgba(0,0,0,.5)";
+  const bw = TOUCH_UI ? 56 : 46, bh = TOUCH_UI ? 40 : 30, gap = TOUCH_UI ? 6 : 5;
+  const owned = [];
+  for (let i = 0; i < WEAPONS.length; i++) if (player.unlocked[i]) owned.push(i);
+  const perRow = Math.max(1, Math.min(owned.length, Math.floor((W * 0.52) / (bw + gap))));
+  let slotRows = 1;
+  owned.forEach((wi2, n) => {
+    const col = n % perRow, row = Math.floor(n / perRow);
+    slotRows = Math.max(slotRows, row + 1);
+    const bx = 16 + col * (bw + gap), by = 124 + row * (bh + gap);
+    uiButtons.push({ x: bx, y: by, w: bw, h: bh, id: "w" + wi2 });
+    const wep = WEAPONS[wi2];
+    const dry = wep.reserveMax !== Infinity && player.ammo[wi2] === 0 && player.reserve[wi2] === 0;
+    g.globalAlpha = dry ? 0.4 : 1;
+    g.fillStyle = wi2 === player.wi ? "rgba(125,213,63,.22)" : "rgba(0,0,0,.5)";
     g.fillRect(bx, by, bw, bh);
-    g.strokeStyle = i === player.wi ? "#7dd53f" : "rgba(255,255,255,.25)";
-    g.lineWidth = i === player.wi ? 2 : 1;
+    g.strokeStyle = wi2 === player.wi ? "#7dd53f" : "rgba(255,255,255,.25)";
+    g.lineWidth = wi2 === player.wi ? 2 : 1;
     g.strokeRect(bx + .5, by + .5, bw - 1, bh - 1);
-    g.fillStyle = WEAPONS[i].color;
-    g.font = "bold " + (TOUCH_UI ? 12 : 10) + "px 'Courier New', monospace"; g.textAlign = "center";
-    g.fillText(String(i + 1), bx + bw / 2, by + bh * 0.4);
-    g.fillText(WEAPONS[i].short, bx + bw / 2, by + bh * 0.78);
+    g.fillStyle = wep.color;
+    g.font = "bold " + (TOUCH_UI ? 11 : 10) + "px 'Courier New', monospace"; g.textAlign = "center";
+    g.fillText(String(wi2 + 1), bx + bw / 2, by + bh * 0.4);
+    g.fillText(wep.short, bx + bw / 2, by + bh * 0.82);
     g.globalAlpha = 1;
-  }
+  });
+  const slotsBottom = 124 + slotRows * (bh + gap);
+
 
   if (TOUCH_UI) {
-    const ry = 124 + bh + 10;
+    const ry = slotsBottom + 4;
     // RELOAD
-    const rw = 2 * bw + gap;
+    const rw = 2 * bw + gap + 24;
     uiButtons.push({ x: 16, y: ry, w: rw, h: bh, id: "reload" });
     const needsReload = player.ammo[player.wi] < player.weapon.mag && !player.reloading;
     g.fillStyle = needsReload ? "rgba(255,215,106,.22)" : "rgba(0,0,0,.5)";
@@ -4051,6 +4457,18 @@ function drawHUD(g) {
     g.restore();
   }
 
+  // new weapon unlocked
+  if (game.newWeaponTime > 0 && game.newWeapon) {
+    const a = clamp(game.newWeaponTime / 700, 0, 1);
+    g.save();
+    g.globalAlpha = a; g.textAlign = "center";
+    g.fillStyle = "#7dd53f"; g.font = "bold 12px 'Courier New', monospace";
+    g.fillText("NEW WEAPON UNLOCKED", W / 2, H * 0.30);
+    g.fillStyle = "#ffd76a"; g.font = "bold 26px 'Courier New', monospace";
+    g.fillText(game.newWeapon, W / 2, H * 0.30 + 28);
+    g.restore();
+  }
+
   // first sighting of an enemy type
   if (game.newEnemyTime > 0 && game.newEnemy) {
     const a = clamp(game.newEnemyTime / 600, 0, 1);
@@ -4152,6 +4570,18 @@ function render() {
   }
 
   for (const g of grenades) g.draw(ctx);
+  for (const pr of projectiles) pr.draw(ctx);
+  // flame cone: additive-looking puffs, one path per size band
+  if (flames.length) {
+    ctx.save();
+    for (const f of flames) {
+      const t = f.life / f.max;
+      ctx.globalAlpha = 0.55 * t;
+      ctx.fillStyle = t > 0.6 ? "#fff0a8" : (t > 0.3 ? "#ff9a2b" : "#c2401a");
+      ctx.beginPath(); ctx.arc(f.x, f.y, f.r + (1 - t) * 13, 0, TAU); ctx.fill();
+    }
+    ctx.restore();
+  }
   for (const z of zombies) z.draw(ctx);
   player.draw(ctx);
 
@@ -4218,6 +4648,29 @@ function render() {
   }
   for (const b of bullets) b.draw(ctx);
   for (const w of shockwaves) w.draw(ctx);
+  // tesla arcs: jagged polylines, drawn once then discarded
+  for (const a of arcs) {
+    const t = a.life / a.max;
+    ctx.save();
+    ctx.globalAlpha = t;
+    ctx.strokeStyle = "#dff6ff"; ctx.lineWidth = 3.5; ctx.lineJoin = "round";
+    for (let pass = 0; pass < 2; pass++) {
+      ctx.beginPath();
+      ctx.moveTo(a.pts[0][0], a.pts[0][1]);
+      for (let i = 1; i < a.pts.length; i++) {
+        const [x0, y0] = a.pts[i - 1], [x1, y1] = a.pts[i];
+        for (let k = 1; k <= 3; k++) {
+          const f = k / 3, jit = k === 3 ? 0 : 9;
+          ctx.lineTo(x0 + (x1 - x0) * f + rand(-jit, jit), y0 + (y1 - y0) * f + rand(-jit, jit));
+        }
+      }
+      ctx.strokeStyle = pass ? "#7de3ff" : "#dff6ff";
+      ctx.lineWidth = pass ? 6 : 2.2;
+      ctx.globalAlpha = t * (pass ? 0.35 : 1);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
   for (const f of floats) f.draw(ctx);
 
   // off-screen zombie indicators
@@ -4308,6 +4761,16 @@ function render() {
   }
 
   drawHUD(ctx);
+  if (game.state === "play" && player.weapon.laser) {
+    ctx.save();
+    ctx.globalAlpha = 0.32; ctx.strokeStyle = "#ff5a5a"; ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(player.x + Math.cos(player.angle) * (player.r + 12),
+               player.y + Math.sin(player.angle) * (player.r + 12));
+    ctx.lineTo(player.x + Math.cos(player.angle) * 900, player.y + Math.sin(player.angle) * 900);
+    ctx.stroke();
+    ctx.restore();
+  }
   if (game.state === "play" && !TOUCH_UI) drawCrosshair(ctx);
   else if (game.state === "play") {
     // touch: mark the aim point without hiding it under the finger
