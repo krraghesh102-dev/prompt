@@ -329,6 +329,39 @@ scaled by wave number and remaining health. Best score persists in
 
 **Drops** — dead zombies sometimes leave medkits (+25 HP) or ammo boxes.
 
+## Landing page
+
+The menu is a cinematic screen layered over one embedded background plate:
+title, subtitle, **CAMPAIGN / ENDLESS / MISSIONS** centred, coins and gems
+bottom-left, settings and controls as icon buttons bottom-right. Settings
+and Controls keep their ids and handlers — they moved out of the button
+column, they were not rebuilt.
+
+The reference artwork supplied for this design is a **full screen mockup**,
+with its own logo, buttons and corner panels painted into the pixels, so it
+could not be used as a plate directly — the live UI ghosted on top of the
+baked one. The plates are composed from it instead: the untouched left
+(survivor, firelight, watchtower) and right (horde, quarantine sign,
+helicopter, moon) are kept sharp and feathered into painted smoke through
+the middle, where the menu sits, and the mockup's own corner panels are
+painted out. Portrait gets its **own composition** rather than a crop of the
+landscape one — a crop would show only the empty middle — with sky and city
+above and the survivor and rubble below.
+
+Both plates are baked to JPEG data URIs (~140KB and ~130KB) so the game
+stays a single file with no external requests, which is what makes it work
+on GitHub Pages and as an artifact alike.
+
+The title is CSS, not an image: stacked text shadows give the letters brick
+depth, red over bone, and it scales with the viewport. Background, logo,
+buttons and the bottom rows fade and rise in on load, staggered; the plate
+drifts very slowly. All of it is disabled under `prefers-reduced-motion`.
+
+Layout is verified on desktop, mobile landscape, small landscape and
+portrait: nothing overlaps, nothing leaves the viewport, no horizontal
+overflow, and every control is at least 46px. The bottom rows sit inside
+`env(safe-area-inset-*)` so Android's gesture bar cannot cover them.
+
 ## Missions
 
 **MISSIONS** on the main menu opens three daily challenges. Each card shows
