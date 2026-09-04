@@ -149,6 +149,13 @@ a blast every fourth).
   for 6.5 seconds, bites and acid included. A ring around you counts the
   time down. Using it while already up extends the timer rather than
   restarting it, so a charge is never wasted.
+Each of the three locks while its own effect runs: a second press — click,
+double-click, held key, or rapid tap — is ignored outright and costs no
+charge. The card dims and shows a progress strip until the effect ends. The
+lock is derived from state each ability already keeps (a grenade in flight,
+the shield expiry, the blast cooldown), so it can never disagree with what
+is actually happening.
+
 - **Power blast** (`Q`) — an instant 210px shockwave centered on you.
   Heavy damage with falloff plus a hard shove outward, and it never hurts
   you. Clears a surrounding pack of walkers outright. Short cooldown so one

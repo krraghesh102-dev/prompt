@@ -356,9 +356,12 @@ addEventListener("keydown", e => {
   if (k === "1") player.selectWeapon(0);
   if (k === "2") player.selectWeapon(1);
   if (k === "3") player.selectWeapon(2);
-  if (k === "g") player.useItem("grenade");
-  if (k === "f") player.useItem("shield");
-  if (k === "q") player.useItem("blast");
+  // holding a key fires keydown repeatedly; one press must mean one use
+  if (!e.repeat) {
+    if (k === "g") player.useItem("grenade");
+    if (k === "f") player.useItem("shield");
+    if (k === "q") player.useItem("blast");
+  }
 });
 addEventListener("keyup", e => { keys[e.key.toLowerCase()] = false; });
 addEventListener("blur", () => { for (const k in keys) keys[k] = false; mouse.down = false; });
@@ -1677,6 +1680,35 @@ function powerupLeft(key) { return Math.max(0, (player.powerups[key] || 0) - gam
    and props are deliberately absent -- only collectibles move. */
 function isMagnetic(pickup) { return !!pickup && !pickup.dead; }
 
+
+/* ---- ability activation lock ----
+   Grenade, shield and blast are locked for as long as their own effect is
+   running. The lock is DERIVED from state each ability already owns -- a
+   live grenade, the shield expiry, the blast cooldown -- rather than a
+   parallel flag or a debounce timer, so it can never disagree with reality.
+
+   Every activation sets that state synchronously inside useItem() before
+   returning, and JS runs an event handler to completion, so a second event
+   in the same frame (a double-click, or two fingers in one touchstart)
+   always observes the lock. */
+function abilityActive(kind) {
+  if (kind === "grenade") return grenades.length > 0;              // still in flight
+  if (kind === "shield")  return player.shielded;                  // barrier up
+  if (kind === "blast")   return game.time < player.blastReady;    // shockwave settling
+  return false;
+}
+
+/* Remaining fraction of the current lock, for the card's progress strip. */
+function abilityLockFrac(kind) {
+  if (kind === "grenade") {
+    const g = grenades[0];
+    return g ? clamp(g.fuse / ITEMS.grenade.fuse, 0, 1) : 0;
+  }
+  if (kind === "shield") return clamp((player.shieldUntil - game.time) / ITEMS.shield.duration, 0, 1);
+  if (kind === "blast")  return clamp((player.blastReady - game.time) / ITEMS.blast.cooldown, 0, 1);
+  return 0;
+}
+
 /* ---------------- entities ---------------- */
 class Player {
   constructor() { this.reset(); }
@@ -1749,9 +1781,16 @@ class Player {
     SFX[w.sfx]();
     if (this.ammo[this.wi] === 0) this.reload();
   }
+  /* The single activation path for grenade / shield / blast. Every input
+     route (key, mouse, touch) funnels through here, and it is the only
+     place a charge is spent. Returns true only when an effect really
+     started, so a rejected repeat click can never cost anything. */
   useItem(kind) {
-    if (game.state !== "play") return;
-    if (this.items[kind] <= 0) { SFX.empty(); game.toast("NO " + ITEMS[kind].name, "#ff6b6b"); return; }
+    if (game.state !== "play") return false;
+    // locked while its own effect runs: ignore the click entirely -- no
+    // charge, no restart, no extension
+    if (abilityActive(kind)) return false;
+    if (this.items[kind] <= 0) { SFX.empty(); game.toast("NO " + ITEMS[kind].name, "#ff6b6b"); return false; }
 
     if (kind === "grenade") {
       const g = ITEMS.grenade;
@@ -1767,20 +1806,21 @@ class Player {
     } else if (kind === "shield") {
       const s = ITEMS.shield;
       this.items.shield--;
-      // re-arming while up extends rather than restarts, so a charge is never wasted
-      this.shieldUntil = Math.max(game.time, this.shieldUntil) + s.duration;
+      // one activation is exactly one full duration; the old extend-on-
+      // re-arm path is unreachable now that the ability locks while up
+      this.shieldUntil = game.time + s.duration;
       game.toast("SECURITY LAYER UP", s.color);
       SFX.shieldOn();
 
     } else if (kind === "blast") {
       const b = ITEMS.blast;
-      if (game.time < this.blastReady) return;
       this.items.blast--;
       this.blastReady = game.time + b.cooldown;
       explode(this.x, this.y, b.radius, b.dmg, b.knock, "#ff8de0", true);
       game.toast("POWER BLAST", b.color);
       SFX.blast();
     }
+    return true;
   }
 
   update(dt) {
@@ -3409,15 +3449,27 @@ function drawHUD(g) {
       const it = ITEMS[kind], n = player.items[kind];
       const bx = ix0 + i * (iw + ig);
       uiButtons.push({ x: bx, y: iy, w: iw, h: ih, id: "item:" + kind });
-      const usable = n > 0;
+      const locked = abilityActive(kind);          // its effect is still running
+      const usable = n > 0 && !locked;
       const active = kind === "shield" && player.shielded;
 
-      g.globalAlpha = usable ? 1 : 0.32;
+      // dimmed while locked, so the card never looks tappable when it isn't
+      g.globalAlpha = locked ? 0.45 : (n > 0 ? 1 : 0.32);
       g.fillStyle = active ? "rgba(95,208,255,.22)" : "rgba(0,0,0,.55)";
       g.fillRect(bx, iy, iw, ih);
-      g.strokeStyle = active ? "#5fd0ff" : (usable ? it.color : "rgba(255,255,255,.22)");
+      g.strokeStyle = active ? "#5fd0ff"
+        : (locked ? "rgba(255,255,255,.28)" : (usable ? it.color : "rgba(255,255,255,.22)"));
       g.lineWidth = active ? 2.5 : (usable ? 1.6 : 1);
       g.strokeRect(bx + .5, iy + .5, iw - 1, ih - 1);
+
+      // remaining-lock strip along the bottom edge of the existing card
+      if (locked) {
+        const f = abilityLockFrac(kind);
+        g.fillStyle = "rgba(0,0,0,.5)";
+        g.fillRect(bx + 2, iy + ih - 5, iw - 4, 3);
+        g.fillStyle = it.color;
+        g.fillRect(bx + 2, iy + ih - 5, (iw - 4) * f, 3);
+      }
 
       // icon
       const cx = bx + iw / 2, cy = iy + ih * 0.38;
