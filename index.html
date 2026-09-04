@@ -147,7 +147,11 @@
      A cinematic menu layered over one background image. Everything is
      positioned inside #menu, so the rest of the overlay system is untouched
      and every existing button keeps its id and its handler. */
-  #menu {
+  /* :not(.hidden) matters -- a bare `#menu { display:block }` outranks
+     `.overlay.hidden { display:none }` on specificity, so the menu would
+     never actually hide and would sit invisibly over the canvas eating
+     every tap once a game started. */
+  #menu:not(.hidden) {
     display: block; padding: 0;
     background: #05070a;
     --safeL: env(safe-area-inset-left, 0px);
