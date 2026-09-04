@@ -597,6 +597,9 @@ const SFX = {
   shotgun: () => { noise(0.18, 0.2, 1400); blip("square", 120, 0.12, 0.07, 40); },
   rifle:   () => { noise(0.05, 0.09, 3000); blip("sawtooth", 300, 0.04, 0.04, 90); },
   hit:     () => noise(0.05, 0.09, 700),
+  headshot:() => { blip("square", 1500, 0.05, 0.05, 700); noise(0.06, 0.10, 2600); },
+  headKill:() => { noise(0.16, 0.16, 900); blip("triangle", 300, 0.14, 0.08, 70); },
+  crit:    () => blip("triangle", 1150, 0.07, 0.045, 1650),
   kill:    () => { blip("triangle", 160, 0.16, 0.09, 50); noise(0.12, 0.08, 500); },
   hurt:    () => blip("sawtooth", 180, 0.22, 0.12, 60),
   reload:  () => { blip("square", 500, 0.05, 0.05); setTimeout(() => blip("square", 380, 0.07, 0.05), 110); },
@@ -1518,7 +1521,7 @@ const WEAPONS = [
   { id: "rifle", name: "RIFLE", short: "RIFL", mode: "hitscan",
     dmg: 15, rof: 85, mag: 32, reload: 1300, spread: 0.075, speed: 17, pellets: 1, auto: true,
     reserveMax: 210, pickup: 40, sfx: "rifle", knock: 2, color: "#8ee8ff", tracer: 0.8,
-    headMul: 2.0, shake: 2.2, recoil: 4,
+    headMul: 2.0, shake: 1.1, recoil: 2.6,
     role: "sustained damage" },
 
   /* pierces a line of enemies; the payoff for precision */
@@ -2490,9 +2493,114 @@ class Projectile {
   }
 }
 
+/* ================= COMBAT FEEDBACK =================
+   One place for every "how much punch does this have" number, so the feel
+   can be tuned without hunting through the code. Per-weapon fire shake and
+   recoil deliberately stay in the WEAPONS rows -- they are weapon data, and
+   duplicating them here would give the game two sources of truth. */
+const COMBAT_FEEDBACK_CONFIG = {
+  hitFlashDuration: 110,        // ms a normal enemy stays lit after a hit
+  bossHitFlashDuration: 55,     // bosses flash briefly: a full white boss is unreadable
+  headshotFlashDuration: 190,   // a head hit reads longer than a body hit
+  bloodParticles: [3, 5],       // per body hit, before the weapon multiplier
+  headshotParticles: 11,
+  killParticles: 18,            // unchanged from before, kept here for tuning
+  headKillParticles: 16,        // extra burst on top of the normal death spray
+  damageTextDuration: 800,
+  floatThrottleMs: 260,         // rapid fire must not paper the screen in HEAD/CRIT
+  muzzleFlashMs: 70,
+  corpseLife: 900,              // visual only; the enemy is logically dead at once
+  maxCorpses: 22,
+  slowMo: { duration: 130, scale: 0.35, multiKill: 4 }
+};
+
+/* Impact shake. Firing shake lives on the weapon; these are the reaction
+   shakes, kept small and short so nothing ever rattles continuously. */
+const SCREEN_SHAKE_CONFIG = {
+  headshot: 5,
+  kill: 1.6,
+  bigKill: 5,        // brute / tank / anything heavy
+  bossHit: 2.2,
+  bossKill: 20,
+  max: 30            // hard ceiling, unchanged
+};
+
+/* Mobile does the same feedback with fewer particles and a calmer camera.
+   Nothing is removed -- flashes, floats, shake and sound all still fire. */
+/* A coarse pointer counts as touch from the very first frame, before any
+   tap has been seen -- resolved once, because this is read many times per
+   frame and matchMedia is not free. */
+let COARSE_POINTER = false;
+try { COARSE_POINTER = matchMedia("(hover: none) and (pointer: coarse)").matches; } catch (e) {}
+function touchDevice() { return TOUCH_UI || COARSE_POINTER; }
+function fxScale() { return touchDevice() ? 0.6 : 1; }
+function fxCount(n) { return Math.max(1, Math.round(n * fxScale())); }
+function addShake(n) { game.shake = Math.min(SCREEN_SHAKE_CONFIG.max, game.shake + n * fxScale()); }
+
+/* Floats are throttled per kind so an automatic weapon cannot stack twenty
+   HEAD labels on top of each other. Score floats are never throttled: one
+   kill is one number. */
+const floatGate = Object.create(null);
+function floatAllowed(kind) {
+  const now = game.time;
+  if (floatGate[kind] !== undefined && now - floatGate[kind] < COMBAT_FEEDBACK_CONFIG.floatThrottleMs) return false;
+  floatGate[kind] = now;
+  return true;
+}
+
+/* Directional impact spray. `ux,uy` is the direction the shot was travelling,
+   so debris continues away from the shooter rather than puffing symmetrically. */
+function impactBurst(x, y, ux, uy, n, colors, speed, life) {
+  const m = Math.hypot(ux, uy) || 1;
+  ux /= m; uy /= m;
+  for (let i = 0; i < n; i++) {
+    const a = Math.atan2(uy, ux) + rand(-0.85, 0.85);
+    const sp = rand(speed[0], speed[1]);
+    particles.push(new Particle(x, y, Math.cos(a) * sp, Math.sin(a) * sp,
+      rand(1.4, 3), pick(colors), rand(life[0], life[1])));
+  }
+}
+
+/* Multi-kill and combo-tier callouts. Both only read game.kills / game.combo
+   -- they award nothing and change no multiplier, they just say out loud what
+   the existing scoring already did. */
+const killWindow = [];          // timestamps of recent kills, game time
+let lastComboTier = 0;
+function noteKill() {
+  const C = COMBAT_FEEDBACK_CONFIG;
+  killWindow.push(game.time);
+  while (killWindow.length && game.time - killWindow[0] > 420) killWindow.shift();
+  if (killWindow.length === C.slowMo.multiKill) {
+    game.toast("MULTI KILL", "#ff8de0");
+    triggerSlowMo();
+  } else if (killWindow.length === 7) {
+    game.toast("MASSACRE", "#ff6bd0");
+  }
+  // combo tiers mirror the multiplier steps the scoring already uses
+  const tier = Math.floor(game.combo / 5);
+  if (tier > lastComboTier && game.combo >= 5) {
+    lastComboTier = tier;
+    const mult = 1 + Math.min(1.5, tier * 0.25);
+    game.toast(game.combo + "x COMBO  " + mult.toFixed(2) + "x", tier >= 4 ? "#ff6bd0" : "#ffd76a");
+    blip("square", 520 + tier * 80, 0.10, 0.05, 900);
+    addShake(1.2);
+  }
+}
+
+/* A very short time dilation for the rare, earned moments only -- a boss
+   going down, or a single shot taking several enemies with it. It scales the
+   frame delta in one place, so every timer stays consistent, and it is
+   decremented inside update() so a pause freezes it like everything else. */
+let slowMoLeft = 0;
+function triggerSlowMo(ms) {
+  slowMoLeft = Math.max(slowMoLeft, ms || COMBAT_FEEDBACK_CONFIG.slowMo.duration);
+}
+
 /* Shared damage application so every mode gets headshots and status alike. */
 function damageEnemy(z, dmg, kx, ky, weapon, hitX, hitY) {
+  const C = COMBAT_FEEDBACK_CONFIG;
   let out = dmg;
+  let head = false;
   if (weapon && weapon.headMul && hitX !== undefined) {
     const hx = z.x + Math.cos(z.angle) * z.r * 0.45;
     const hy = z.y + Math.sin(z.angle) * z.r * 0.45;
@@ -2500,13 +2608,21 @@ function damageEnemy(z, dmg, kx, ky, weapon, hitX, hitY) {
     if (dist2(hitX, hitY, hx, hy) < hr * hr) {
       out *= z.isBoss ? Math.min(1.4, weapon.headMul) : weapon.headMul;   // bosses resist
       game.headshots++;
-      floats.push(new FloatText(z.x, z.y - z.r - 6, "HEAD", "#ffd76a", false));
+      head = true;
+      // a head hit reads harder: bigger spray from the head itself, a longer
+      // flash, a sharper kick and a short camera snap
+      impactBurst(hx, hy, kx, ky, fxCount(C.headshotParticles),
+        ["#c81f2a", "#8a1a1a", "#ffd76a", "#fff3b0"], [2.5, 7], [280, 620]);
+      addShake(SCREEN_SHAKE_CONFIG.headshot);
+      SFX.headshot();
+      if (floatAllowed("head")) floats.push(new FloatText(z.x, z.y - z.r - 8, "HEADSHOT", "#ffd76a", false));
     }
   }
   // critical hit: independent of headshots, capped by upgrade level
   if (player.critChance > 0 && Math.random() < player.critChance) {
     out *= player.critMul;
-    floats.push(new FloatText(z.x + 8, z.y - z.r - 14, "CRIT", "#ff6bd0", false));
+    if (floatAllowed("crit")) floats.push(new FloatText(z.x + 8, z.y - z.r - 20, "CRITICAL", "#ff6bd0", false));
+    SFX.crit();
   }
   // incendiary rounds
   if (player.igniteChance > 0 && Math.random() < player.igniteChance) {
@@ -2514,7 +2630,11 @@ function damageEnemy(z, dmg, kx, ky, weapon, hitX, hitY) {
   }
   if (weapon && weapon.burn) z.applyBurn(weapon.burn.dps, weapon.burn.dur);
   if (weapon && weapon.freeze) z.applyFreeze(weapon.freeze);
-  z.hurt(out, kx, ky);
+  // the head hit shoves harder, and the flash hint rides along so hurt()
+  // can size its own reaction without re-deriving anything
+  z._headHit = head;
+  z.hurt(out, kx * (head ? 1.5 : 1), ky * (head ? 1.5 : 1), weapon);
+  z._headHit = false;
   return out;
 }
 
@@ -2900,6 +3020,7 @@ class Player {
     this.invuln = 0;
     this.stamina = 100; this.sprinting = false;
     this.recoil = 0;
+    this.muzzle = null;        // { t, max, size, angle, color } for one frame or two
     this.walkPhase = 0;
     this.items = { grenade: ITEMS.grenade.start, shield: ITEMS.shield.start,
                    blast: ITEMS.blast.start, airstrike: ITEMS.airstrike.start };
@@ -2952,15 +3073,39 @@ class Player {
     (FIRE_MODES[w.mode] || FIRE_MODES.hitscan)(this, w, base);
 
     this.recoil = w.recoil !== undefined ? w.recoil : 4;
-    game.shake = Math.min(14, game.shake + (w.shake !== undefined ? w.shake : 2.2));
+    // per-weapon fire shake stays weapon data; only the mobile scaling is new
+    game.shake = Math.min(14, game.shake + (w.shake !== undefined ? w.shake : 2.2) * fxScale());
+
+    // a drawn flash at the barrel, sized from the weapon's own recoil so the
+    // pistol pops and the rocket blooms without a second table of numbers
+    const heat = clamp((w.recoil !== undefined ? w.recoil : 4) / 12, 0.25, 1);
+    this.muzzle = {
+      t: COMBAT_FEEDBACK_CONFIG.muzzleFlashMs,
+      max: COMBAT_FEEDBACK_CONFIG.muzzleFlashMs,
+      size: 7 + heat * 16 + (w.pellets > 1 ? 6 : 0),
+      angle: base,
+      color: w.mode === "stream" ? "#ffb04a" : (w.id === "freeze" ? "#bfefff" : (w.id === "tesla" ? "#bfefff" : "#ffd98a"))
+    };
+
     const flashN = w.mode === "stream" ? 2 : (w.pellets > 1 ? 12 : 5);
-    for (let i = 0; i < flashN; i++) {
+    for (let i = 0; i < fxCount(flashN); i++) {
       const a = base + rand(-0.35, 0.35);
       particles.push(new Particle(
         this.x + Math.cos(base) * (this.r + 12), this.y + Math.sin(base) * (this.r + 12),
         Math.cos(a) * rand(2, 7), Math.sin(a) * rand(2, 7),
         rand(2, 4), pick(w.mode === "stream" ? ["#ff8a2b", "#ffd05a"] : ["#fff3b0", "#ffb648", "#ff7a18"]), 220
       ));
+    }
+    // slow, drifting smoke -- only for the weapons heavy enough to earn it
+    if (heat > 0.5) {
+      for (let i = 0; i < fxCount(w.pellets > 1 ? 4 : 2); i++) {
+        const a = base + rand(-0.5, 0.5);
+        particles.push(new Particle(
+          this.x + Math.cos(base) * (this.r + 15), this.y + Math.sin(base) * (this.r + 15),
+          Math.cos(a) * rand(0.4, 1.6), Math.sin(a) * rand(0.4, 1.6),
+          rand(3, 6), pick(["#6b6b6b", "#8a8a8a", "#54544f"]), rand(420, 700)
+        ));
+      }
     }
     if (SFX[w.sfx]) SFX[w.sfx]();
     if (this.ammo[this.wi] === 0) this.reload();
@@ -3060,6 +3205,7 @@ class Player {
     fireQueued = false;
 
     this.recoil = Math.max(0, this.recoil - 0.6 * dt);
+    if (this.muzzle) { this.muzzle.t -= 16.6 * dt; if (this.muzzle.t <= 0) this.muzzle = null; }
     if (this.invuln > 0) this.invuln -= dt * 16.6;
   }
   damage(n) {
@@ -3129,6 +3275,28 @@ class Player {
     // head
     g.fillStyle = "#d9b48f";
     g.beginPath(); g.arc(2, 0, 6.5, 0, TAU); g.fill();
+
+    // muzzle flash: a petal and a glow, both in the gun's own rotated space
+    if (this.muzzle) {
+      const m = this.muzzle, k = clamp(m.t / m.max, 0, 1);
+      const len = m.size * (0.55 + k * 0.45), wid = m.size * 0.34 * k + 1.5;
+      g.save();
+      g.globalAlpha = k;
+      g.fillStyle = m.color;
+      g.beginPath();
+      g.moveTo(this.r + 6, 0);
+      g.lineTo(this.r + 6 + len * 0.45, -wid);
+      g.lineTo(this.r + 6 + len, 0);
+      g.lineTo(this.r + 6 + len * 0.45, wid);
+      g.closePath(); g.fill();
+      g.globalAlpha = k * 0.75;
+      g.fillStyle = "#fff6d5";
+      g.beginPath(); g.arc(this.r + 8, 0, wid * 0.8, 0, TAU); g.fill();
+      g.globalAlpha = k * 0.22;                       // soft bloom around it
+      g.fillStyle = m.color;
+      g.beginPath(); g.arc(this.r + 9, 0, m.size * 0.7, 0, TAU); g.fill();
+      g.restore();
+    }
     g.restore();
   }
 }
@@ -3207,7 +3375,7 @@ class Zombie {
     this.burnUntil = 0; this.burnDps = 0; this.burnTick = 0;   // flamethrower
     this.frozenUntil = 0;                                       // freeze gun
   }
-  hurt(n, kx, ky) {
+  hurt(n, kx, ky, weapon) {
     // a shield zombie soaks hits that land on its guard; flank it instead
     if (this.type === "shieldz" && (kx || ky)) {
       const m = Math.hypot(kx, ky) || 1;
@@ -3225,17 +3393,33 @@ class Zombie {
         blip("square", 250, 0.04, 0.035, 160);
       }
     }
+    const C = COMBAT_FEEDBACK_CONFIG;
+    const head = !!this._headHit;
     this.hp -= n;
-    this.flash = 120;
+    // bosses only tick rather than turning fully white -- a flashing boss
+    // hides the tells the fight is read from
+    this.flash = this.isBoss ? C.bossHitFlashDuration
+               : (head ? C.headshotFlashDuration : C.hitFlashDuration);
     this.kx += kx / this.mass; this.ky += ky / this.mass;
-    for (let i = 0; i < 4; i++) {
-      const a = Math.atan2(ky, kx) + rand(-0.9, 0.9);
-      particles.push(new Particle(this.x, this.y, Math.cos(a) * rand(1, 4), Math.sin(a) * rand(1, 4), rand(1.5, 3), "#8a1a1a", 420));
+
+    // directional blood, scaled by what fired: a shotgun pellet contributes
+    // less than a rifle round so seven of them do not bury the screen
+    if (!head) {
+      const per = weapon && weapon.pellets > 1 ? 0.5 : (weapon && weapon.mode === "stream" ? 0.35 : 1);
+      const n0 = randInt(C.bloodParticles[0], C.bloodParticles[1]);
+      impactBurst(this.x, this.y, kx, ky, Math.max(1, fxCount(n0 * per)),
+        ["#8a1a1a", "#5e0d10", "#c81f2a"], [1, 4], [300, 460]);
     }
-    if (this.hp <= 0 && !this.dead) this.die();
+    if (this.isBoss && !this.dead) addShake(SCREEN_SHAKE_CONFIG.bossHit);
+
+    if (this.hp <= 0 && !this.dead) this.die(kx, ky, head);
     else SFX.hit();
   }
-  die() {
+  die(kx, ky, head) {
+    // logical death happens here and once: from this instant the enemy is
+    // filtered out of `zombies`, so it cannot attack, be hit again, score
+    // twice or drop twice. Everything below is one-shot bookkeeping, and the
+    // corpse that carries the animation is a separate, purely visual object.
     this.dead = true;
     if (this.type === "exploder") this.detonate();
     if (player.lifesteal > 0 && player.hp < player.maxHp) {   // vampiric ammo
@@ -3249,10 +3433,34 @@ class Zombie {
     const pts = Math.round(this.t.points * mult);
     game.addScore(pts, this.x, this.y, mult > 1);
     SFX.kill();
-    for (let i = 0; i < 18; i++) {
+    const C = COMBAT_FEEDBACK_CONFIG;
+    for (let i = 0; i < fxCount(C.killParticles); i++) {
       const a = rand(0, TAU), s = rand(1, 6);
       particles.push(new Particle(this.x, this.y, Math.cos(a) * s, Math.sin(a) * s, rand(2, 5), pick(["#7d0c12", "#a3161d", "#5b6b2f"]), 700));
     }
+    // a lethal head hit gets its own directional burst on top
+    if (head && !this.isBoss) {
+      impactBurst(this.x + Math.cos(this.angle) * this.r * 0.45,
+                  this.y + Math.sin(this.angle) * this.r * 0.45,
+                  kx || 1, ky || 0, fxCount(C.headKillParticles),
+                  ["#c81f2a", "#7d0c12", "#e8d8b0", "#fff3b0"], [3, 8], [320, 700]);
+      game.flash = Math.max(game.flash, 0.22);
+      SFX.headKill();
+    }
+    // the shove that killed it carries into the corpse, so heavy weapons
+    // still visibly throw bodies
+    corpses.push(new Corpse(this, (this.kx || 0) + (kx || 0) * 0.12,
+                                  (this.ky || 0) + (ky || 0) * 0.12, head));
+    if (corpses.length > C.maxCorpses) corpses.shift();
+
+    if (this.isBoss) { addShake(SCREEN_SHAKE_CONFIG.bossKill); triggerSlowMo(); }
+    else {
+      // an explosion can kill a dozen at once; without this damping their
+      // kill shakes stack into a long rattle on top of the blast's own
+      const damp = 1 / (1 + killWindow.length * 0.7);
+      addShake((this.mass >= 2.4 ? SCREEN_SHAKE_CONFIG.bigKill : SCREEN_SHAKE_CONFIG.kill) * damp);
+    }
+    noteKill();
     decals.push({ x: this.x, y: this.y, r: this.r * rand(1.1, 1.8), a: 0.5 });
     if (decals.length > 90) decals.shift();
     // drops
@@ -3666,10 +3874,10 @@ class Shockwave {
 function explode(x, y, radius, dmg, knock, color, selfSafe) {
   shockwaves.push(new Shockwave(x, y, radius, color, 7));
   shockwaves.push(new Shockwave(x, y, radius * 0.62, "#ffffff", 3));
-  game.shake = Math.min(26, game.shake + 16);
+  addShake(16);                      // same punch, now calmer on a phone
   game.flash = Math.max(game.flash, 0.5);
 
-  for (let i = 0; i < 34; i++) {
+  for (let i = 0; i < fxCount(34); i++) {
     const a = rand(0, TAU), sp = rand(2, 9);
     particles.push(new Particle(x, y, Math.cos(a) * sp, Math.sin(a) * sp, rand(2, 5.5),
       pick([color, "#fff3b0", "#ff7a18", "#6b6b6b"]), rand(400, 800)));
@@ -4005,9 +4213,74 @@ class FloatText {
   }
 }
 
+/* A corpse is pure decoration. It is created the instant an enemy dies and
+   lives in its own array, never in `zombies` -- so it cannot be hit, cannot
+   attack, and cannot score, drop or die a second time however long its
+   animation runs. Each type falls differently. */
+const DEATH_STYLES = {
+  runner:  { spin: 0.24, drag: 0.94, life: 0.85, sink: 0.55, lunge: 1.9 },  // pitches forward
+  brute:   { spin: 0.07, drag: 0.90, life: 1.35, sink: 0.30, lunge: 0.2 },  // heavy, slow topple
+  tank:    { spin: 0.05, drag: 0.89, life: 1.45, sink: 0.26, lunge: 0.2 },
+  spitter: { spin: 0.30, drag: 0.87, life: 0.90, sink: 0.70, lunge: 0.5, mist: "#b57ef0" },
+  crawler: { spin: 0.18, drag: 0.90, life: 0.75, sink: 0.65, lunge: 0.8 },
+  boss:    { spin: 0.04, drag: 0.93, life: 1.8,  sink: 0.20, lunge: 0.3 },
+  _default:{ spin: 0.16, drag: 0.91, life: 1,    sink: 0.5,  lunge: 0.8 }
+};
+
+class Corpse {
+  constructor(z, vx, vy, head) {
+    const st = DEATH_STYLES[z.type] || (z.isBoss ? DEATH_STYLES.boss : DEATH_STYLES._default);
+    this.x = z.x; this.y = z.y; this.angle = z.angle; this.type = z.type;
+    this.r = z.r; this.isBoss = !!z.isBoss; this.t = z.t; this.st = st;
+    this.phase = z.phase || 0;
+    this.vx = (vx || 0) + Math.cos(z.angle) * st.lunge;
+    this.vy = (vy || 0) + Math.sin(z.angle) * st.lunge;
+    this.spin = rand(-st.spin, st.spin) + (head ? rand(-0.1, 0.1) : 0);
+    this.life = COMBAT_FEEDBACK_CONFIG.corpseLife * st.life;
+    this.maxLife = this.life;
+    this.dead = false;
+  }
+  update(dt) {
+    this.x += this.vx * dt; this.y += this.vy * dt;
+    this.vx *= Math.pow(this.st.drag, dt); this.vy *= Math.pow(this.st.drag, dt);
+    this.angle += this.spin * dt;
+    this.spin *= Math.pow(0.93, dt);
+    this.life -= 16.6 * dt;
+    if (this.st.mist && this.life > this.maxLife * 0.7 && Math.random() < 0.25 * fxScale()) {
+      particles.push(new Particle(this.x, this.y, rand(-.6, .6), rand(-.6, .6), rand(2, 4), this.st.mist, 380));
+    }
+    if (this.life <= 0) this.dead = true;
+  }
+  draw(g) {
+    const t = this.life / this.maxLife;
+    // settles for the first third, then sinks into the ground and fades
+    const settle = clamp(t * 1.5, 0, 1);
+    const squash = 1 - (1 - settle) * this.st.sink;
+    g.save();
+    g.globalAlpha = clamp(t * 2.2, 0, 1) * 0.9;
+    g.fillStyle = "rgba(0,0,0,.3)";
+    g.beginPath(); g.ellipse(this.x, this.y + this.r * 0.85, this.r * 0.95 * squash, this.r * 0.42, 0, 0, TAU); g.fill();
+    g.translate(this.x, this.y);
+    g.rotate(this.angle);
+    g.scale(squash, squash * (0.72 + settle * 0.28));   // flattens as it drops
+    const set = zombieSkinSet();
+    const skin = set && set[this.type];
+    const pal = (set && SET_PAL[game.theme && game.theme.zombieSet]) || DEFAULT_PAL;
+    // reuse the exact art the live enemy used, never a second sprite set
+    if (skin) skin.call(set, g, this, this.r, 0, false);
+    else if (TYPE_SHAPES[this.type]) TYPE_SHAPES[this.type](g, this, this.r, 0, false, pal);
+    else {
+      g.fillStyle = (this.t && this.t.color) || "#6d7a4a";
+      g.beginPath(); g.arc(0, 0, this.r, 0, TAU); g.fill();
+    }
+    g.restore();
+    g.globalAlpha = 1;
+  }
+}
+
 /* ---------------- world collections ---------------- */
 let bullets = [], zombies = [], particles = [], pickups = [], floats = [], decals = [], spits = [];
-let grenades = [], shockwaves = [];
+let grenades = [], shockwaves = [], corpses = [];
 const player = new Player();
 
 /* ---------------- game / wave logic ---------------- */
@@ -4033,9 +4306,11 @@ const game = {
 
   reset() {
     bullets = []; zombies = []; particles = []; pickups = []; floats = []; decals = []; spits = [];
-    grenades = []; shockwaves = [];
+    grenades = []; shockwaves = []; corpses = [];
     projectiles = []; flames = []; arcs = [];
     resetAirStrike();
+    slowMoLeft = 0; killWindow.length = 0;
+    for (const k in floatGate) delete floatGate[k];
     player.reset();
     this.score = 0; this.kills = 0; this.wave = 0;
     this.shotsFired = 0; this.shotsHit = 0; this.headshots = 0; this.maxCombo = 0;
@@ -4893,7 +5168,11 @@ function update(dt) {
   player.update(dt);
 
   for (const b of bullets) b.update(dt);
-  for (const z of zombies) z.update(dt);
+  // An enemy killed outside this loop -- a power blast or air strike fired
+  // from an input handler, say -- was still alive to `zombies` until the
+  // filter below, so it got one more tick and could land a bite after death.
+  // Logical death takes effect immediately: no update, no attack.
+  for (const z of zombies) if (!z.dead) z.update(dt);
   for (const p of particles) p.update(dt);
   for (const p of pickups) p.update(dt);
   for (const f of floats) f.update(dt);
@@ -4906,6 +5185,7 @@ function update(dt) {
   }
   for (const a of arcs) { a.life -= 16.6 * dt; if (a.life <= 0) a.dead = true; }
   for (const w of shockwaves) w.update(dt);
+  for (const c of corpses) c.update(dt);
   updateAirStrike(dt);
   for (const s of spits) {
     s.x += s.vx * dt; s.y += s.vy * dt; s.life -= 16.6 * dt;
@@ -4926,9 +5206,17 @@ function update(dt) {
   flames = flames.filter(o => !o.dead);
   arcs = arcs.filter(o => !o.dead);
   shockwaves = shockwaves.filter(o => !o.dead);
+  corpses = corpses.filter(o => !o.dead);
 
   // combo decay
-  if (game.comboTimer > 0) { game.comboTimer -= 16.6 * dt; if (game.comboTimer <= 0) game.combo = 0; }
+  if (game.comboTimer > 0) {
+    game.comboTimer -= 16.6 * dt;
+    if (game.comboTimer <= 0) {
+      // combo ends quietly: a big banner here would punish the player twice
+      if (game.combo >= 5) floats.push(new FloatText(player.x, player.y - 34, "COMBO LOST", "#7f8a79", false));
+      game.combo = 0; lastComboTier = 0;
+    }
+  }
 
   // wave director
   if (game.waveActive) {
@@ -5193,7 +5481,7 @@ function drawHUD(g) {
   // display scale to keep a ~46 CSS-px tap target whatever the viewport.
   // A coarse pointer counts even before the first touch, so the button is
   // already the right size on the very first frame of a phone session.
-  const pbTouch = TOUCH_UI || matchMedia("(hover: none) and (pointer: coarse)").matches;
+  const pbTouch = touchDevice();
   const pbW = pbTouch ? Math.max(52, 46 / scale) : 42;
   const pbH = pbTouch ? Math.max(44, 46 / scale) : 34;
   const pbX = W - pbW - 16, pbY = 12;
@@ -5552,6 +5840,7 @@ function render() {
     }
     ctx.restore();
   }
+  for (const c of corpses) c.draw(ctx);      // bodies lie under the living
   for (const z of zombies) z.draw(ctx);
   player.draw(ctx);
 
@@ -5767,7 +6056,15 @@ function frame(now) {
     // state and overlays must never disagree -- a stale panel over live
     // gameplay would be unplayable, so the loop enforces it
     if (overlayShown) hideAllScreens();
-    update(dt);
+    // Slow motion scales the one delta every timer is derived from, so
+    // game.time, cooldowns, fuses and animations all stay in step -- and
+    // because it burns down here it freezes with the rest on pause.
+    if (slowMoLeft > 0) {
+      slowMoLeft = Math.max(0, slowMoLeft - dt * 16.6667);
+      update(dt * COMBAT_FEEDBACK_CONFIG.slowMo.scale);
+    } else {
+      update(dt);
+    }
   }
   render();
   requestAnimationFrame(frame);

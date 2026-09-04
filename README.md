@@ -267,6 +267,61 @@ the settle — and its charge is spent only when the target is confirmed.
   than skipping ahead; the impact points are decided at confirmation, so a
   pause cannot reshuffle where the bombs land.
 
+## Combat feel
+
+Every number that decides how much punch a hit has lives in
+`COMBAT_FEEDBACK_CONFIG` and `SCREEN_SHAKE_CONFIG` near the top of the
+combat section, so the feel can be tuned in one place. Per-weapon fire
+shake and recoil deliberately stay on the `WEAPONS` rows — they are weapon
+data, and copying them into a second table would give the game two sources
+of truth.
+
+The chain a player should read without thinking: **shot → impact → damage →
+reaction → kill → score → combo.**
+
+- **Muzzle flash** — a drawn petal, hot core and soft bloom at the barrel,
+  sized from the weapon's own recoil value, plus drifting smoke for the
+  heavy weapons. The pistol pops, the shotgun blooms, the rifle ticks.
+- **Recoil** is visual only: the sprite kicks back along the aim and
+  recovers. It never moves your point of aim.
+- **Hit flash** — every enemy type lights for 110ms, a head hit for 190ms,
+  and a **boss only 55ms** so its tells stay readable.
+- **Impact** — directional blood that continues along the shot rather than
+  puffing symmetrically. Shotgun pellets contribute half each, so a full
+  seven-pellet blast is not seven times the spray.
+- **Headshots** — bigger burst from the head itself, longer flash, 1.5x the
+  shove, a short camera snap, a distinct sound and a `HEADSHOT` label. A
+  *lethal* head hit adds its own directional burst and a screen bloom; a
+  non-lethal one does not play the death effect.
+- **Floating text** is throttled per label kind (`floatThrottleMs`), so
+  automatic fire cannot stack twenty `HEADSHOT`s on top of each other —
+  while still counting every one. Score floats are never throttled: one
+  kill is one number.
+- **Combo tiers** announce at every fifth kill with the multiplier the
+  scoring already applies (`5x COMBO 1.25x`). They award nothing; they just
+  say out loud what already happened. Expiry is a quiet one-line float.
+- **Multi-kill** — four kills inside 420ms calls `MULTI KILL`, seven calls
+  `MASSACRE`.
+- **Screen shake** is short and bounded (cap 30, ~0.88 decay per frame).
+  Kill shakes damp against the recent-kill count, so an explosion taking a
+  dozen enemies does not stack a dozen shakes into a long rattle.
+- **Slow motion** is deliberately rare: a boss kill or a four-kill burst,
+  130ms at 0.35 speed. It scales the single frame delta every timer is
+  derived from, so nothing drifts out of step, and it burns down inside
+  `update()` — pausing freezes it like everything else. An ordinary
+  headshot never triggers it.
+- **Death animations** — each type falls differently (`DEATH_STYLES`): the
+  runner pitches forward, the brute topples slowly, the spitter leaks
+  purple. A corpse is a **separate object that never enters `zombies`**, so
+  it cannot be hit, cannot attack, and cannot score, drop or die a second
+  time however long its animation runs. The list is capped at 22.
+
+*Mobile* runs the same feedback at `fxScale()` = 0.6 — fewer particles and
+a calmer camera, with every flash, label, shake and sound still firing.
+Nothing is removed. Measured on a 844x390 viewport with 30 enemies,
+sustained fire and headshot kills: worst frame 4.2ms against a 16.7ms
+budget.
+
 **Scoring** — kills award points, and a kill streak builds a combo multiplier
 (up to 2.5x) that decays if you stop killing. Clearing a wave pays a bonus
 scaled by wave number and remaining health. Best score persists in
