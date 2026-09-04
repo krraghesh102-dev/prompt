@@ -125,6 +125,8 @@
   .upCard:not(.taken):hover, .upCard:not(.taken):active {
     border-color: var(--toxic); background: rgba(24,34,18,.95); transform: translateY(-3px);
   }
+  .upCard .rar { font-size: 9px; letter-spacing: 3px; opacity: .9; }
+  .upCard .wp { font-size: 10px; letter-spacing: 2px; color: #8a9678; }
   .upCard .ic { font-size: 30px; line-height: 1; }
   .upCard .nm { font-size: 15px; letter-spacing: 2px; color: var(--toxic); }
   .upCard .ds { font-size: 12px; color: #cfd6c9; letter-spacing: 1px; }
@@ -232,8 +234,8 @@
 
 <div id="upgrade" class="overlay hidden">
   <div class="panel wide">
-    <h2>CHOOSE YOUR UPGRADE</h2>
-    <div class="sub" id="upSub">Select 1 upgrade before entering the stage</div>
+    <h2 id="upTitle">UPGRADE AVAILABLE</h2>
+    <div class="sub" id="upSub">Choose 1 upgrade</div>
     <div class="grid" id="upCards"></div>
     <div class="unlockNote" id="upNote"></div>
   </div>
@@ -2254,6 +2256,10 @@ function damageEnemy(z, dmg, kx, ky, weapon, hitX, hitY) {
     out *= player.critMul;
     floats.push(new FloatText(z.x + 8, z.y - z.r - 14, "CRIT", "#ff6bd0", false));
   }
+  // incendiary rounds
+  if (player.igniteChance > 0 && Math.random() < player.igniteChance) {
+    z.applyBurn(9, 1600);
+  }
   if (weapon && weapon.burn) z.applyBurn(weapon.burn.dps, weapon.burn.dur);
   if (weapon && weapon.freeze) z.applyFreeze(weapon.freeze);
   z.hurt(out, kx, ky);
@@ -2273,6 +2279,7 @@ const FIRE_MODES = {
         w.dmg, w.knock, w.color, w.tracer);
       b.weapon = w;
       b.pierce = w.pierce || 0;
+      if (w.rangeMul) b.life *= w.rangeMul;
       bullets.push(b);
     }
   },
@@ -2361,6 +2368,24 @@ const FIRE_MODES = {
    so a future weapon needs only its rows here. */
 const UPGRADE_MAX = 5;
 
+/* Rarity drives both the size of the improvement and how often an upgrade is
+   offered. Boss stages shift the weights upward without changing the rules. */
+const RARITY = {
+  common:    { label: "COMMON",    color: "#9aa694", weight: 60, bossWeight: 34, mul: 1.00 },
+  rare:      { label: "RARE",      color: "#6fc3ff", weight: 26, bossWeight: 32, mul: 1.35 },
+  epic:      { label: "EPIC",      color: "#c98cff", weight: 11, bossWeight: 24, mul: 1.75 },
+  legendary: { label: "LEGENDARY", color: "#ffd34d", weight: 3,  bossWeight: 10, mul: 1.00 }
+};
+
+/* Behaviour-changing upgrades. Each is a flag the gameplay code reads, so a
+   new one is an entry here plus the single hook that honours it. */
+const SPECIALS = {
+  piercing:   { name: "PIERCING ROUNDS",  icon: "🏹", desc: "bullets pass through one more enemy" },
+  vampiric:   { name: "VAMPIRIC AMMO",    icon: "🩸", desc: "recover health on kills" },
+  incendiary: { name: "INCENDIARY ROUNDS",icon: "🔥", desc: "chance to ignite on hit" }
+};
+function specialLevel(id) { return upgradeLevel("s:" + id); }
+
 /* Feature gates. Each answers "can the player actually use this yet?" */
 const FEATURES = {
   health:   () => true,
@@ -2394,7 +2419,7 @@ function weaponUpgrades() {
   const rows = [];
   const add = (wid, id, name, icon, cat, step, fmt, extra) => {
     rows.push(Object.assign({ id: wid + ":" + id, weapon: wid, name, icon, cat,
-      step, fmt, max: UPGRADE_MAX }, extra || {}));
+      step, fmt, max: UPGRADE_MAX, rarity: "common" }, extra || {}));
   };
   for (const w of WEAPONS) {
     const N = w.name;
@@ -2423,6 +2448,13 @@ function weaponUpgrades() {
       add(w.id, "crange", "TESLA CHAIN RANGE", "📡", "special", 0.12, l => pct(0.12 * l) + " chain range");
     }
     if (w.freeze) add(w.id, "freeze", "FREEZE DURATION", "❄️", "special", 0.12, l => pct(0.12 * l) + " freeze time");
+    if (w.range) add(w.id, "range", N + " RANGE", "📏", "range", 0.12, l => pct(0.12 * l) + " range", { rarity: "rare" });
+    else if (w.mode === "hitscan") add(w.id, "range", N + " RANGE", "📏", "range", 0.10, l => pct(0.10 * l) + " range", { rarity: "rare" });
+  }
+  // rarer tiers give bigger steps on the same stat
+  for (const r of rows) {
+    if (r.cat === "damage") { r.rarity = "rare"; }
+    if (r.cat === "special") { r.rarity = "rare"; }
   }
   return rows;
 }
@@ -2439,17 +2471,43 @@ const UPGRADES = weaponUpgrades().concat([
   { id: "k:ammo",    feature: "pickups", name: "AMMO PICKUPS",   icon: "🎒", cat: "pickup",   step: 0.15, max: UPGRADE_MAX, fmt: l => pct(0.15 * l) + " ammo from pickups" },
   { id: "k:health",  feature: "pickups", name: "MEDKIT POTENCY", icon: "🩹", cat: "pickup",   step: 0.15, max: UPGRADE_MAX, fmt: l => pct(0.15 * l) + " healing" },
   { id: "m:dur",     feature: "magnet",  name: "MAGNET DURATION","icon": "🧲", cat: "pickup", step: 0.15, max: UPGRADE_MAX, fmt: l => pct(0.15 * l) + " magnet time" },
-  { id: "m:range",   feature: "magnet",  name: "MAGNET RANGE",   icon: "🧲", cat: "pickup",   step: 0.12, max: UPGRADE_MAX, fmt: l => pct(0.12 * l) + " magnet range" }
+  { id: "m:range",   feature: "magnet",  name: "MAGNET RANGE",   icon: "🧲", cat: "pickup",   step: 0.12, max: UPGRADE_MAX, fmt: l => pct(0.12 * l) + " magnet range" },
+
+  /* Universal upgrades touch every unlocked weapon, so they are deliberately
+     rarer than the single-weapon rows. */
+  { id: "u:dmg",    weapon: "*", name: "WEAPON MASTERY",  icon: "⭐", cat: "universal", step: 0.05, max: UPGRADE_MAX, rarity: "epic", fmt: l => pct(0.05 * l) + " damage, all weapons" },
+  { id: "u:rof",    weapon: "*", name: "COMBAT TRAINING", icon: "🎖", cat: "universal", step: 0.05, max: UPGRADE_MAX, rarity: "epic", fmt: l => pct(0.05 * l) + " fire rate, all weapons" },
+  { id: "u:reload", weapon: "*", name: "FAST HANDS",      icon: "🤲", cat: "universal", step: 0.06, max: UPGRADE_MAX, rarity: "rare", fmt: l => pctDown(0.06 * l) + " reload, all weapons" },
+
+  /* Behaviour changers: rare by design, one level each. */
+  { id: "s:piercing",   feature: "crit", name: SPECIALS.piercing.name,   icon: SPECIALS.piercing.icon,   cat: "behaviour", step: 1, max: 2, rarity: "legendary", fmt: l => "bullets pierce +" + l + " enemy" },
+  { id: "s:vampiric",   feature: "crit", name: SPECIALS.vampiric.name,   icon: SPECIALS.vampiric.icon,   cat: "behaviour", step: 1, max: 3, rarity: "legendary", fmt: l => "+" + l + " HP per kill" },
+  { id: "s:incendiary", feature: "crit", name: SPECIALS.incendiary.name, icon: SPECIALS.incendiary.icon, cat: "behaviour", step: 1, max: 3, rarity: "legendary", fmt: l => (l * 12) + "% chance to ignite" }
 ]);
+for (const u of UPGRADES) if (!u.rarity) u.rarity = "common";
 const UPGRADE_BY_ID = {};
 for (const u of UPGRADES) UPGRADE_BY_ID[u.id] = u;
 
-function upgradeLevel(id) { return (Progress.data.upgrades && Progress.data.upgrades[id]) || 0; }
+/* Campaign upgrades are permanent; endless keeps a separate run-scoped
+   container so enabling endless upgrades later cannot touch campaign
+   progression. Endless still inherits unlocked WEAPONS, just not levels. */
+const ENDLESS_USES_CAMPAIGN_UPGRADES = false;
+let runUpgrades = {};
+/* Explicit flag rather than reading game.mode: `mode` defaults to "endless"
+   before anything is launched, so keying off it meant campaign upgrades were
+   read from the empty run store at boot and never applied. */
+let runScopedUpgrades = false;
+function upgradeStore() {
+  if (runScopedUpgrades && !ENDLESS_USES_CAMPAIGN_UPGRADES) return runUpgrades;
+  return (Progress.data.upgrades = Progress.data.upgrades || {});
+}
+function upgradeLevel(id) { return upgradeStore()[id] || 0; }
 
 /* An upgrade is offerable only if its weapon is unlocked / its feature is
    live, and it is not already maxed. This runs before any random pick. */
 function upgradeIsValid(u) {
   if (upgradeLevel(u.id) >= u.max) return false;
+  if (u.weapon === "*") return getAvailableWeaponsForUpgrade().length > 0;
   if (u.weapon) return getAvailableWeaponsForUpgrade().includes(u.weapon);
   if (u.feature) return featureAvailable(u.feature);
   return true;
@@ -2457,22 +2515,36 @@ function upgradeIsValid(u) {
 
 /* Build, shuffle, then take three -- preferring three different categories so
    the offer never reads as the same upgrade three times. */
-function rollUpgradeChoices(n) {
+/* Weighted by rarity, then de-duplicated by category so the three cards are a
+   real decision rather than the same stat three times. `boss` shifts the
+   weights toward the better tiers without changing any other rule. */
+function rollUpgradeChoices(n, boss) {
   n = n || 3;
   const pool = UPGRADES.filter(upgradeIsValid);
-  for (let i = pool.length - 1; i > 0; i--) {      // Fisher-Yates
-    const j = Math.floor(Math.random() * (i + 1));
-    [pool[i], pool[j]] = [pool[j], pool[i]];
-  }
   const chosen = [], cats = new Set();
-  for (const u of pool) {
-    if (chosen.length >= n) break;
-    if (cats.has(u.cat)) continue;
+  /* Pick the rarity TIER first, then an entry inside it. Weighting entries
+     directly let the ~90 common rows drown out the handful of epics, so
+     universal and legendary upgrades were effectively never offered. */
+  const takeOne = (requireNewCat) => {
+    const cands = pool.filter(u => !chosen.includes(u) && (!requireNewCat || !cats.has(u.cat)));
+    if (!cands.length) return null;
+    const byTier = {};
+    for (const u of cands) (byTier[u.rarity] = byTier[u.rarity] || []).push(u);
+    const tiers = Object.keys(byTier);
+    let total = 0;
+    for (const t of tiers) total += boss ? RARITY[t].bossWeight : RARITY[t].weight;
+    let roll = Math.random() * total;
+    for (const t of tiers) {
+      roll -= boss ? RARITY[t].bossWeight : RARITY[t].weight;
+      if (roll <= 0) { const g = byTier[t]; return g[Math.floor(Math.random() * g.length)]; }
+    }
+    const g = byTier[tiers[tiers.length - 1]];
+    return g[Math.floor(Math.random() * g.length)];
+  };
+  while (chosen.length < n) {
+    const u = takeOne(true) || takeOne(false);     // relax the category rule if needed
+    if (!u) break;
     chosen.push(u); cats.add(u.cat);
-  }
-  for (const u of pool) {                          // top up if categories ran out
-    if (chosen.length >= n) break;
-    if (!chosen.includes(u)) chosen.push(u);
   }
   return chosen;
 }
@@ -2482,6 +2554,7 @@ function rollUpgradeChoices(n) {
 function applyUpgrades() {
   const L = id => upgradeLevel(id);
 
+  const uni = { dmg: L("u:dmg"), rof: L("u:rof"), reload: L("u:reload") };
   player.wstats = WEAPONS.map(w => {
     const o = Object.assign({}, w);
     const l = id => L(w.id + ":" + id);
@@ -2494,11 +2567,26 @@ function applyUpgrades() {
     if (l("pellets")) o.pellets = w.pellets + l("pellets");
     if (l("knock"))  o.knock = w.knock * (1 + 0.15 * l("knock"));
     if (l("head"))   o.headMul = (w.headMul || 1) + 0.2 * l("head");
+    if (l("range")) {
+      if (w.range) o.range = Math.round(w.range * (1 + 0.12 * l("range")));
+      else o.rangeMul = 1 + 0.10 * l("range");     // hitscan: longer bullet life
+    }
+    // universal rows stack multiplicatively on top of the per-weapon ones
+    if (uni.dmg)    o.dmg *= 1 + 0.05 * uni.dmg;
+    if (uni.rof)    o.rof *= 1 - 0.05 * uni.rof;
+    if (uni.reload) o.reload *= 1 - 0.06 * uni.reload;
     o.knock *= 1 + 0.10 * L("c:knock");
+    o.pierce = (w.pierce || 0) + L("s:piercing");  // piercing rounds
     if (w.projectile) {
       o.projectile = Object.assign({}, w.projectile);
       if (l("radius")) o.projectile.radius = Math.round(w.projectile.radius * (1 + 0.10 * l("radius")));
       if (l("pspeed")) o.speed = w.speed * (1 + 0.12 * l("pspeed"));
+      // explosive damage lives in projectile.blast, not dmg, so the damage
+      // rows have to reach it or they would silently do nothing
+      let blastMul = 1;
+      if (l("dmg")) blastMul *= 1 + 0.10 * l("dmg");
+      if (uni.dmg) blastMul *= 1 + 0.05 * uni.dmg;
+      if (blastMul !== 1) o.projectile.blast = Math.round(w.projectile.blast * blastMul);
     }
     if (w.burn && l("burn")) o.burn = { dps: w.burn.dps, dur: Math.round(w.burn.dur * (1 + 0.15 * l("burn"))) };
     if (w.chain) {
@@ -2525,6 +2613,8 @@ function applyUpgrades() {
   player.healBoost = 1 + 0.15 * L("k:health");
   player.magnetDur = MAGNET_CONFIG.duration * (1 + 0.15 * L("m:dur"));
   player.magnetRadius = MAGNET_CONFIG.radius * (1 + 0.12 * L("m:range"));
+  player.lifesteal = L("s:vampiric");                    // HP per kill
+  player.igniteChance = 0.12 * L("s:incendiary");
 }
 function wstat(i) { return (player.wstats && player.wstats[i]) || WEAPONS[i]; }
 
@@ -2558,6 +2648,7 @@ class Player {
     this.critChance = 0; this.critMul = 1.5;
     this.ammoBoost = 1; this.healBoost = 1;
     this.magnetDur = MAGNET_CONFIG.duration; this.magnetRadius = MAGNET_CONFIG.radius;
+    this.lifesteal = 0; this.igniteChance = 0;
     this._puWas = {};          // edge detection for the expiry notice
   }
   get shielded() { return game.time < this.shieldUntil; }
@@ -2876,6 +2967,9 @@ class Zombie {
   die() {
     this.dead = true;
     if (this.type === "exploder") this.detonate();
+    if (player.lifesteal > 0 && player.hp < player.maxHp) {   // vampiric ammo
+      player.hp = Math.min(player.maxHp, player.hp + player.lifesteal);
+    }
     game.kills++;
     game.combo++;
     game.comboTimer = 2200;
@@ -3667,6 +3761,7 @@ const game = {
   startStage(worldId, stageNo) {
     const world = WORLDS.find(w => w.id === worldId);
     this.mode = "campaign";
+    runScopedUpgrades = false;                  // campaign uses the saved levels
     this.cw = worldId; this.cs = stageNo;
     this.diff = world.diff;
     this.theme = WORLD_THEMES[world.id] || null;
@@ -3999,12 +4094,10 @@ function showStages(worldId) {
    begin until the choice is made because update() only runs in "play". */
 function launchStage(worldId, stageNo) {
   audio();
-  game.startStage(worldId, stageNo);        // sets up the stage, does not run it
-  showUpgradeChoice(() => {
-    game.state = "play";
-    hideAllScreens();
-    checkOrientation();
-  });
+  game.startStage(worldId, stageNo);
+  game.state = "play";
+  hideAllScreens();
+  checkOrientation();
 }
 
 
@@ -4013,53 +4106,71 @@ function launchStage(worldId, stageNo) {
    "upgrade", so update() never ticks and wave 1 cannot begin behind it. */
 let upgradeLocked = false;
 
-function showUpgradeChoice(onDone) {
-  const choices = rollUpgradeChoices(3);
-  if (!choices.length) { onDone(); return; }        // genuinely nothing valid: never fake one
+function showUpgradeChoice(onDone, opts) {
+  opts = opts || {};
+  const choices = rollUpgradeChoices(3, !!opts.boss);
+  if (!choices.length) { onDone(); return; }        // nothing valid: never fake one
 
   upgradeLocked = false;
   game.state = "upgrade";
   const wrap = $("upCards");
   wrap.innerHTML = "";
-  $("upSub").textContent = "Select 1 upgrade before entering the stage";
+  $("upTitle").textContent = opts.boss ? "BOSS REWARD" : "UPGRADE AVAILABLE";
+  $("upSub").textContent = "Choose 1 upgrade";
   $("upNote").textContent = "";
 
   choices.forEach(u => {
     const lvl = upgradeLevel(u.id);
+    const rar = RARITY[u.rarity] || RARITY.common;
     const card = document.createElement("div");
-    card.className = "upCard";
-    card.innerHTML =
-      '<div class="ic"></div><div class="nm"></div><div class="ds"></div><div class="lv"></div>';
+    card.className = "upCard rar-" + u.rarity;
+    card.style.borderColor = rar.color;
+    card.innerHTML = '<div class="rar"></div><div class="ic"></div><div class="nm"></div>' +
+                     '<div class="wp"></div><div class="ds"></div><div class="lv"></div>';
+    card.querySelector(".rar").textContent = rar.label;
+    card.querySelector(".rar").style.color = rar.color;
     card.querySelector(".ic").textContent = u.icon;
     card.querySelector(".nm").textContent = u.name;
+    card.querySelector(".wp").textContent =
+      u.weapon === "*" ? "ALL WEAPONS"
+      : u.weapon ? (WEAPONS[WEAPON_INDEX[u.weapon]] || {}).name || ""
+      : "PLAYER";
     card.querySelector(".ds").textContent = u.fmt(lvl + 1);
     card.querySelector(".lv").textContent = "LEVEL " + lvl + "  \u2192  " + (lvl + 1) + " / " + u.max;
 
     const choose = (ev) => {
       if (ev) { ev.preventDefault(); ev.stopPropagation(); }
-      // first valid selection wins; every later click/tap is ignored
-      if (upgradeLocked) return;
+      if (upgradeLocked) return;                    // first valid selection wins
       upgradeLocked = true;
-      audio();
-      Progress.data.upgrades[u.id] = upgradeLevel(u.id) + 1;
-      Progress.save();
-      applyUpgrades();
-      SFX.pickup();
+      applyUpgrade(u.id);                           // the system, not the handler, changes stats
       for (const c of wrap.children) c.classList.add("taken");
       card.classList.remove("taken");
       card.classList.add("picked");
       $("upSub").textContent = "UPGRADE SELECTED";
-      $("upNote").textContent = u.name + "  \u00b7  LEVEL " + Progress.data.upgrades[u.id];
-      setTimeout(onDone, 620);                       // brief confirmation, then play
+      $("upNote").textContent = u.name + "  \u00b7  " + u.fmt(upgradeLevel(u.id));
+      setTimeout(onDone, 700);                      // short confirmation, then continue
     };
-    // one handler, on the whole card; pointerdown covers mouse and touch
-    // without the pair firing twice
-    card.addEventListener("pointerdown", choose);
+    card.addEventListener("pointerdown", choose);   // one handler covers mouse and touch
     wrap.appendChild(card);
   });
 
   hideAllScreens(); showScreen("upgrade");
   checkOrientation();
+}
+
+/* The single entry point for granting an upgrade. Validates, caps, raises the
+   level, recomputes stats and saves -- UI only ever names an id. */
+function applyUpgrade(id) {
+  const u = UPGRADE_BY_ID[id];
+  if (!u) return false;
+  const store = upgradeStore();
+  const lvl = store[id] || 0;
+  if (lvl >= u.max) return false;
+  store[id] = lvl + 1;
+  if (store !== runUpgrades) Progress.save();       // run-scoped upgrades are not persisted
+  applyUpgrades();
+  audio(); SFX.pickup();
+  return true;
 }
 
 /* ---- stage results ---- */
@@ -4085,23 +4196,40 @@ function showStageComplete(world, stage, starCount, res) {
   $("sdUnlock").textContent = note;
 
   const hasNext = game.cs < world.stages.length;
-  $("sdNext").textContent = hasNext ? "NEXT STAGE" : "WORLD SELECT";
-  $("sdNext").onclick = () => {
+  const isBoss = !!stage.boss;
+
+  // Clearing a stage earns one upgrade. It is claimed on the way out of the
+  // results screen, whichever exit the player takes, so the reward is never
+  // skipped -- and the results screen itself is untouched.
+  upgradePending = rollUpgradeChoices(3, isBoss).length > 0;
+  const claim = (after) => () => {
     audio();
-    if (hasNext) launchStage(world.id, game.cs + 1);
-    else showWorlds();
+    if (upgradePending) {
+      upgradePending = false;
+      showUpgradeChoice(after, { boss: isBoss });
+    } else after();
   };
-  // the boss stage routes through the cinematic first
-  if (!hasNext) { pendingWorldComplete = { world, res, starCount }; }
-  else pendingWorldComplete = null;
+
+  $("sdNext").textContent = upgradePending ? "CLAIM UPGRADE"
+    : (hasNext ? "NEXT STAGE" : "WORLD SELECT");
+  $("sdNext").onclick = claim(() => {
+    if (hasNext) launchStage(world.id, game.cs + 1);
+    else if (pendingWorldComplete) showWorldComplete();
+    else showWorlds();
+  });
+  $("sdReplay").onclick = claim(() => launchStage(game.cw, game.cs));
+  $("sdSelect").onclick = claim(() => showStages(game.cw));
+
+  // the boss stage still routes through the cinematic, after the reward
+  pendingWorldComplete = hasNext ? null : { world, res, starCount };
 
   hideAllScreens();
-  if (pendingWorldComplete) showWorldComplete();
-  else showScreen("stagedone");
+  showScreen("stagedone");
   checkOrientation();
 }
 
 let pendingWorldComplete = null;
+let upgradePending = false;
 
 function showWorldComplete() {
   const { world, res } = pendingWorldComplete;
@@ -4149,6 +4277,7 @@ function togglePause() {
 function startEndless() {
   audio();
   game.mode = "endless";
+  runScopedUpgrades = true; runUpgrades = {};   // a fresh, run-only upgrade set
   game.theme = null; game.diff = 1;
   invalidatePropLayer(); seedAtmos();
   game.reset();
@@ -4190,8 +4319,8 @@ $("setReset").addEventListener("click", () => {
 });
 $("worldsBack").addEventListener("click", goMenu);
 $("stagesBack").addEventListener("click", () => { audio(); showWorlds(); });
-$("sdReplay").addEventListener("click", () => launchStage(game.cw, game.cs));
-$("sdSelect").addEventListener("click", () => { audio(); showStages(game.cw); });
+/* sdNext / sdReplay / sdSelect are wired per-result in showStageComplete so
+   every exit claims the pending upgrade first. */
 $("retryBtn").addEventListener("click", retry);
 $("goSelect").addEventListener("click", () => {
   audio();

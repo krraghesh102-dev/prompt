@@ -237,10 +237,17 @@ plus its art — not a change to the pickup system.
 
 ## Upgrades
 
-Every campaign stage opens with **CHOOSE YOUR UPGRADE** — three cards, pick
-one, then the stage starts. The game is frozen behind the popup (`game.state`
-is `"upgrade"`, and `update()` only runs in `"play"`), so wave 1 cannot begin
-until you choose. It appears once per stage, never between waves.
+Clearing a campaign stage earns one upgrade. The existing results screen is
+unchanged — its continue button becomes **CLAIM UPGRADE**, which opens a
+three-card choice, then carries on to wherever you were going. Every exit
+(next stage, replay, stage select) claims it first, so the reward is never
+skipped. Boss stages reward one too, before the world cinematic.
+
+Upgrades have four rarities — common, rare, epic, legendary — which set both
+how big the step is and how often it is offered. The tier is rolled first and
+an entry picked inside it, so the handful of epics are not drowned out by the
+many commons. Boss stages shift the weights upward (measured: epic 9.7% to
+18.5%, legendary 2.9% to 9.4%).
 
 The three cards are drawn only from upgrades you can actually use. An entry
 declares either a `weapon` (must be unlocked, read from live progression —
@@ -249,11 +256,19 @@ anything already at level 5 leaves the pool. The remainder is shuffled and
 three are taken, preferring three different categories.
 
 Categories: per-weapon damage / fire rate / reload / magazine / accuracy /
-ammo capacity, plus weapon-specific ones (shotgun pellets and knockback,
-sniper crit damage, blast radius and shell speed, burn duration, tesla chain
-count and range, freeze duration); player health, armor, move speed, stamina
-and sprint recovery; crit chance, crit damage and knockback; ammo and medkit
-potency; magnet duration and range.
+ammo capacity / range, plus weapon-specific ones (shotgun pellets and
+knockback, sniper crit damage, blast radius and shell speed, burn duration,
+tesla chain count and range, freeze duration); player health, armor, move
+speed, stamina and sprint recovery; crit chance, crit damage and knockback;
+ammo and medkit potency; magnet duration and range. Universal rows
+(**Weapon Mastery**, **Combat Training**, **Fast Hands**) improve every
+unlocked weapon at once and are rarer. Legendary behaviour upgrades change
+how a weapon works: **piercing rounds**, **vampiric ammo**, **incendiary
+rounds** — new ones are an entry plus the single hook that honours it.
+
+Endless keeps a **separate, run-scoped** upgrade set, so nothing earned in a
+run touches campaign progression, and campaign levels do not carry into a
+run. Endless still inherits unlocked weapons.
 
 Armor and crit chance are hard-capped at 20%. Magnet upgrades only appear
 once you have actually collected a magnet. Levels are saved in the campaign
