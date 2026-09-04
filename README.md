@@ -20,7 +20,7 @@ Open `index.html` in any modern browser. That's it.
 | `G` | Throw grenade |
 | `F` | Raise security layer (shield) |
 | `Q` | Power blast |
-| `P` / `Esc` | Pause |
+| `P` / `Esc` | Pause / resume |
 
 ## On a phone
 
@@ -34,7 +34,8 @@ lands, so there is no fixed pad to hunt for.
 | **Left half** — drag anywhere | Move in any direction; push far to sprint |
 | **Right half** — drag anywhere | Aim in that direction and fire continuously |
 | **Right half** — quick tap | Fire at the exact spot you tapped |
-| On-screen buttons (top-left) | Weapon slots, reload, pause |
+| On-screen buttons (top-left) | Weapon slots, reload |
+| Pause button (top-right) | Open the pause menu |
 | On-screen buttons (bottom-right) | Grenade, shield, power blast |
 
 Both thumbs work at once, so you can retreat while firing behind you.
@@ -43,6 +44,42 @@ Because aim on the right stick is a *direction* rather than a screen
 position, every heading is reachable — including straight back over the
 hand that is moving you. The playfield width follows the screen aspect
 ratio, so the game fills a phone edge to edge.
+
+## Pausing
+
+Press `P` or `Esc`, or hit the **pause button in the top-right of the HUD** —
+it is drawn on desktop and mobile alike, and sized to a comfortable tap
+target on a phone.
+
+Pausing freezes the whole simulation, not just movement. `game.state` is the
+only thing that decides whether gameplay is running: `update()` is called
+solely in the `play` state, so zombie AI, spawning, wave and break timers,
+ability durations, magnet, reload, burn and freeze, stamina, projectiles in
+flight and the combo timer all stop together and cannot drift apart. The
+battlefield stays visible behind the dimmed panel. Resuming rebases the
+frame clock, so time spent paused is never delivered as one huge delta.
+
+The menu offers four choices:
+
+| Option | Effect |
+|---|---|
+| **RESUME GAME** | Back to play immediately |
+| **RESTART STAGE** | Rebuilds the current stage from the start |
+| **QUIT GAME** | Leaves the stage for the stage-select screen |
+| **GO TO MENU** | Back to the main menu |
+
+The last three ask for confirmation first; **CANCEL** returns to the pause
+menu with the game still frozen. Restarting a stage rebuilds only stage
+state — unlocked weapons, banked upgrades, stars and campaign progress live
+in the save and are untouched.
+
+While the pause menu or a confirmation is open, no click or touch reaches
+the canvas: the overlay covers it, the canvas handlers ignore input outside
+the `play` state, and any key or thumb held at the moment of pausing is
+released so resuming cannot fire a stray shot or keep walking. A
+confirmation also ignores input for a quarter-second after opening, so the
+second tap of a double-tap on a menu button cannot answer the dialog that
+tap just opened.
 
 ## Campaign
 

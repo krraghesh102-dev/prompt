@@ -133,6 +133,15 @@
   .upCard .lv { font-size: 11px; color: #8a9678; letter-spacing: 2px; }
   .upCard.picked { border-color: #ffd76a; background: rgba(60,50,10,.9); }
   .upCard.taken { opacity: .35; cursor: default; transform: none; }
+  /* pause / confirm dialogs: compact, centred, same visual language */
+  .pausePanel {
+    background: rgba(8,11,7,.92);
+    border: 2px solid #3d4a33;
+    box-shadow: 0 0 0 1px rgba(125,213,63,.10), 0 18px 60px rgba(0,0,0,.65);
+    padding: 26px 30px; max-width: 420px; margin: auto;
+  }
+  .pausePanel .menuBtns button { min-width: 240px; padding: 13px 26px; }
+  #paused, #confirm { background: rgba(4,6,4,.72); }   /* battlefield stays visible */
   .stack { display: flex; flex-direction: column; gap: 9px; width: 100%; }
 
   .results { display: grid; grid-template-columns: 1fr auto; gap: 5px 18px; font-size: 13px;
@@ -161,6 +170,8 @@
     .bigStars { font-size: 30px; margin: 4px 0 10px; }
     .results { font-size: 12px; margin-bottom: 12px; }
     .menuBtns button { min-width: 200px; }
+    .pausePanel { padding: 14px 16px; max-width: 340px; }
+    .pausePanel .menuBtns button { min-width: 190px; padding: 12px 18px; font-size: 13px; }
     .upCard { min-height: 110px; padding: 10px 8px; gap: 4px; }
     .upCard .ic { font-size: 22px; }
     .upCard .nm { font-size: 13px; }
@@ -301,12 +312,25 @@
 </div>
 
 <div id="paused" class="overlay hidden">
-  <div class="panel">
-    <h2>PAUSED</h2>
-    <div class="sub">press P or ESC to resume</div>
+  <div class="panel pausePanel">
+    <h2>GAME PAUSED</h2>
+    <div class="sub" id="pauseHint">gameplay paused &nbsp;·&nbsp; press P or ESC to resume</div>
     <div class="menuBtns">
-      <button id="resumeBtn">RESUME</button>
-      <button class="ghost" id="pauseQuit">QUIT STAGE</button>
+      <button id="resumeBtn">RESUME GAME</button>
+      <button class="ghost" id="pauseRestart">RESTART STAGE</button>
+      <button class="ghost" id="pauseQuit">QUIT GAME</button>
+      <button class="ghost" id="pauseMenu">GO TO MENU</button>
+    </div>
+  </div>
+</div>
+
+<div id="confirm" class="overlay hidden">
+  <div class="panel pausePanel">
+    <h2 id="cfTitle">ARE YOU SURE?</h2>
+    <div class="sub" id="cfMsg"></div>
+    <div class="menuBtns">
+      <button id="cfYes">CONFIRM</button>
+      <button class="ghost" id="cfNo">CANCEL</button>
     </div>
   </div>
 </div>
@@ -348,14 +372,14 @@ function resize() {
 function checkOrientation() {
   const portrait = window.innerHeight > window.innerWidth;
   const isTouch = matchMedia("(hover: none)").matches || TOUCH_UI;
-  const inGame = game.state === "play" || game.state === "paused";
+  const inGame = game.state === "play" || isPausedState(game.state);
   const show = portrait && isTouch && inGame;
   document.getElementById("rotate").classList.toggle("hidden", !show);
   const pausedEl = document.getElementById("paused");
   if (show) {
     // pause silently — stacking the pause panel under the rotate notice
     // made both unreadable, and RESUME must not be reachable in portrait
-    if (game.state === "play") game.state = "paused";
+    if (game.state === "play") { game.state = "paused"; releaseGameplayInput(); }
     pausedEl.classList.add("hidden");
   } else if (game.state === "paused") {
     pausedEl.classList.remove("hidden");   // back in landscape: resume deliberately
@@ -406,6 +430,7 @@ canvas.addEventListener("mousedown", e => {
   const p = toWorld(e.clientX, e.clientY);
   const btn = hitButton(p.x, p.y);
   if (btn) { pressButton(btn); return; }
+  if (game.state !== "play") return;   // paused / on a menu: never shoot
   mouse.down = true; fireQueued = true;
 });
 addEventListener("mouseup", e => { if (e.button === 0) mouse.down = false; });
@@ -421,8 +446,9 @@ function hitButton(x, y) {
   return null;
 }
 function pressButton(b) {
+  if (b.id === "pause") { togglePause(); return; }
+  if (game.state !== "play") return;    // stale HUD buttons stay inert off-play
   if (b.id === "reload") player.reload();
-  else if (b.id === "pause") togglePause();
   else if (b.id.startsWith("item:")) player.useItem(b.id.slice(5));
   else if (b.id.startsWith("w")) player.selectWeapon(+b.id.slice(1));
 }
@@ -440,6 +466,8 @@ const STICK_CAP = 62;      // world px for full deflection
 const AIM_DEADZONE = 16;   // below this a touch counts as a tap, not a drag
 function handleTouchStart(e) {
   TOUCH_UI = true;
+  // while paused or on any overlay, taps belong to the DOM menu, not the canvas
+  if (game.state !== "play") { e.preventDefault(); return; }
   for (const t of e.changedTouches) {
     const p = toWorld(t.clientX, t.clientY);
     const btn = hitButton(p.x, p.y);
@@ -3912,7 +3940,7 @@ const game = {
 
 /* ================= SCREENS =================
    One place decides which overlay is up, so no two can stack. */
-const SCREENS = ["menu", "how", "settings", "worlds", "worldintro", "stages", "upgrade", "stagedone", "worlddone", "gameover", "paused"];
+const SCREENS = ["menu", "how", "settings", "worlds", "worldintro", "stages", "upgrade", "stagedone", "worlddone", "gameover", "paused", "confirm"];
 let overlayShown = true;   // cheap mirror of "is any overlay up"
 function showScreen(id) {
   for (const sc of SCREENS) {
@@ -4263,15 +4291,78 @@ function refreshSettings() {
     "   \u00b7   BEST WAVE " + Progress.data.highestWave;
 }
 
+/* game.state is the single source of truth for "is gameplay running".
+   update() runs only in "play", so pausing freezes movement, AI, spawning,
+   every timer and every status effect at once -- there is no second pause
+   flag that could disagree with it. */
+function isPausedState(st) { return st === "paused" || st === "confirm"; }
+
+function pauseGame() {
+  if (game.state !== "play") return;          // rapid clicks cannot re-enter
+  game.state = "paused";
+  releaseGameplayInput();
+  $("pauseHint").textContent = TOUCH_UI ? "gameplay paused \u00b7 tap RESUME to continue"
+                                        : "gameplay paused \u00b7 press P or ESC to resume";
+  hideAllScreens(); showScreen("paused");
+}
+
+function resumeGame() {
+  if (!isPausedState(game.state)) return;     // and cannot resume twice
+  game.state = "play";
+  releaseGameplayInput();
+  // the frame loop rebases its clock on the way back in, so the paused
+  // wall-time is never delivered as one enormous delta
+  hideAllScreens();
+  checkOrientation();
+}
+
 function togglePause() {
-  if (game.state !== "play" && game.state !== "paused") return;
-  if (game.state === "play") {
-    game.state = "paused";
-    document.getElementById("paused").classList.remove("hidden");
-  } else if (game.state === "paused") {
-    game.state = "play";
-    document.getElementById("paused").classList.add("hidden");
-  }
+  if (game.state === "play") pauseGame();
+  else if (game.state === "paused") resumeGame();
+  // during a confirmation the keys do nothing: the player must answer it
+}
+
+/* Drop any input held at the moment of pausing, so resuming cannot fire a
+   shot or keep walking from a key/touch that was down. */
+function releaseGameplayInput() {
+  mouse.down = false; fireQueued = false;
+  for (const k in keys) keys[k] = false;
+  touch.moveId = null; touch.active = false; touch.dx = 0; touch.dy = 0;
+  touch.aimId = null; touch.aimActive = false; touch.aimDragged = false;
+  touch.adx = 0; touch.ady = 0;
+  if (player) player._heldFire = false;
+}
+
+/* Reusable confirmation. Sits on its own state so gameplay stays frozen and
+   the pause menu is not reachable underneath it. */
+let confirmLocked = false;
+let confirmReadyAt = 0;
+function showConfirm(title, msg, yesLabel, onYes) {
+  game.state = "confirm";
+  confirmLocked = false;
+  // a double-tap on the button that opened this would otherwise land on the
+  // dialog and answer it instantly, so ignore input for one tap window
+  confirmReadyAt = performance.now() + 250;
+  $("cfTitle").textContent = title;
+  $("cfMsg").textContent = msg;
+  $("cfYes").textContent = yesLabel;
+  $("cfYes").onclick = (e) => {
+    if (e) e.preventDefault();
+    if (confirmLocked || performance.now() < confirmReadyAt) return;   // one answer only
+    confirmLocked = true;
+    audio();
+    onYes();
+  };
+  $("cfNo").onclick = (e) => {
+    if (e) e.preventDefault();
+    if (confirmLocked || performance.now() < confirmReadyAt) return;
+    confirmLocked = true;
+    audio();
+    game.state = "paused";                    // straight back to the pause menu
+    hideAllScreens(); showScreen("paused");
+    confirmLocked = false;
+  };
+  hideAllScreens(); showScreen("confirm");
 }
 
 function startEndless() {
@@ -4326,11 +4417,32 @@ $("goSelect").addEventListener("click", () => {
   audio();
   if (game.mode === "campaign") showStages(game.cw); else goMenu();
 });
-$("resumeBtn").addEventListener("click", togglePause);
+$("resumeBtn").addEventListener("click", () => { audio(); resumeGame(); });
+
+$("pauseRestart").addEventListener("click", () => {
+  audio();
+  showConfirm("RESTART STAGE?", "Your current progress in this stage will be lost.",
+    "RESTART", () => {
+      // only stage state is rebuilt; unlocks, upgrades, stars and campaign
+      // progress all live in the save and are untouched
+      if (game.mode === "campaign") launchStage(game.cw, game.cs);
+      else startEndless();
+    });
+});
+
 $("pauseQuit").addEventListener("click", () => {
   audio();
-  game.state = "menu";
-  if (game.mode === "campaign") showStages(game.cw); else goMenu();
+  showConfirm("QUIT GAME?", "Are you sure you want to quit this stage?",
+    "QUIT", () => {
+      game.state = "menu";
+      if (game.mode === "campaign") showStages(game.cw); else goMenu();
+    });
+});
+
+$("pauseMenu").addEventListener("click", () => {
+  audio();
+  showConfirm("RETURN TO MENU?", "Your current stage progress will be lost.",
+    "GO TO MENU", () => { game.state = "menu"; goMenu(); });
 });
 
 /* ---------------- collision ---------------- */
@@ -4694,16 +4806,26 @@ function drawHUD(g) {
     g.strokeRect(16.5, ry + .5, rw - 1, bh - 1);
     g.fillStyle = "#ffd76a"; g.font = "bold 13px 'Courier New', monospace"; g.textAlign = "center";
     g.fillText(player.reloading ? "..." : "RELOAD", 16 + rw / 2, ry + bh * 0.62);
-    // PAUSE
-    const px2 = 16 + rw + gap;
-    uiButtons.push({ x: px2, y: ry, w: bw, h: bh, id: "pause" });
-    g.fillStyle = "rgba(0,0,0,.5)"; g.fillRect(px2, ry, bw, bh);
-    g.strokeStyle = "rgba(255,255,255,.25)"; g.lineWidth = 1;
-    g.strokeRect(px2 + .5, ry + .5, bw - 1, bh - 1);
-    g.fillStyle = "#cfd6c9";
-    g.fillRect(px2 + bw / 2 - 7, ry + bh / 2 - 8, 5, 16);
-    g.fillRect(px2 + bw / 2 + 2, ry + bh / 2 - 8, 5, 16);
   }
+
+  // PAUSE -- top-right corner, always drawn so mouse and touch both have it.
+  // World px shrink on a phone, so on touch the size is derived from the
+  // display scale to keep a ~46 CSS-px tap target whatever the viewport.
+  // A coarse pointer counts even before the first touch, so the button is
+  // already the right size on the very first frame of a phone session.
+  const pbTouch = TOUCH_UI || matchMedia("(hover: none) and (pointer: coarse)").matches;
+  const pbW = pbTouch ? Math.max(52, 46 / scale) : 42;
+  const pbH = pbTouch ? Math.max(44, 46 / scale) : 34;
+  const pbX = W - pbW - 16, pbY = 12;
+  uiButtons.push({ x: pbX, y: pbY, w: pbW, h: pbH, id: "pause" });
+  g.fillStyle = "rgba(0,0,0,.55)"; g.fillRect(pbX, pbY, pbW, pbH);
+  g.strokeStyle = "rgba(255,255,255,.3)"; g.lineWidth = 1.4;
+  g.strokeRect(pbX + .5, pbY + .5, pbW - 1, pbH - 1);
+  g.fillStyle = "#cfd6c9";
+  g.fillRect(pbX + pbW / 2 - 7, pbY + pbH / 2 - 9, 5, 18);
+  g.fillRect(pbX + pbW / 2 + 2, pbY + pbH / 2 - 9, 5, 18);
+  // the right-hand readout column slides left to clear the button
+  const rx = pbX - 16;
 
   // gear slots -- bottom right, near the firing thumb on touch.
   // Drawn on every device and always clickable, so mouse and tap both work.
@@ -4809,21 +4931,21 @@ function drawHUD(g) {
   g.textAlign = "right";
   g.fillStyle = "#e9efe4";
   g.font = "bold 26px 'Courier New', monospace";
-  g.fillText(game.score.toLocaleString(), W - 16, 38);
+  g.fillText(game.score.toLocaleString(), rx, 38);
   g.font = "bold 12px 'Courier New', monospace";
   g.fillStyle = "#9aa694";
-  g.fillText("SCORE   BEST " + game.best.toLocaleString(), W - 16, 56);
+  g.fillText("SCORE   BEST " + game.best.toLocaleString(), rx, 56);
 
   g.fillStyle = "#7dd53f";
   g.font = "bold 18px 'Courier New', monospace";
   g.fillText(game.mode === "campaign" && game.plan
     ? "WAVE " + Math.min(game.plan.length, game.planIdx + 1) + "/" + game.plan.length
-    : "WAVE " + game.wave, W - 16, 84);
+    : "WAVE " + game.wave, rx, 84);
   g.fillStyle = "#9aa694";
   g.font = "bold 12px 'Courier New', monospace";
   const remaining = game.waveActive ? (game.toSpawn + zombies.length) : 0;
-  g.fillText(game.waveActive ? ("LEFT " + remaining) : ("NEXT IN " + Math.max(0, Math.ceil(game.breakTimer / 1000)) + "s"), W - 16, 102);
-  g.fillText("KILLS " + game.kills, W - 16, 120);
+  g.fillText(game.waveActive ? ("LEFT " + remaining) : ("NEXT IN " + Math.max(0, Math.ceil(game.breakTimer / 1000)) + "s"), rx, 102);
+  g.fillText("KILLS " + game.kills, rx, 120);
 
   // combo
   if (game.combo >= 3) {
@@ -4840,7 +4962,7 @@ function drawHUD(g) {
   if (game.boss && !game.boss.dead) {
     // sit between the left HUD column and the right-hand score block so the
     // bar never overlaps the player's own health readout
-    const lPad = 250, rPad = 200;
+    const lPad = 250, rPad = 200 + pbW + 12;
     const avail = Math.max(180, W - lPad - rPad);
     const bw = Math.min(620, avail), bx = lPad + (avail - bw) / 2, by = 30, bh = 15;
     const cx = bx + bw / 2;
@@ -4933,7 +5055,7 @@ function drawHUD(g) {
     g.fillStyle = "#7f8a79";
     const world = WORLDS.find(w => w.id === game.cw);
     g.fillText("W" + String(game.cw).padStart(2, "0") + " \u00b7 S" + String(game.cs).padStart(2, "0") +
-      " \u00b7 " + world.stages[game.cs - 1].name, W - 16, 138);
+      " \u00b7 " + world.stages[game.cs - 1].name, rx, 138);
   }
 
   // banner
@@ -5208,7 +5330,12 @@ function render() {
 
 /* ---------------- loop ---------------- */
 let last = performance.now();
+let wasPlaying = false;
 function frame(now) {
+  // any time gameplay resumes -- from pause, a menu, a restart -- the wall
+  // time spent away must not arrive as one giant delta
+  if (game.state === "play" && !wasPlaying) last = now;
+  wasPlaying = game.state === "play";
   let dt = (now - last) / 16.6667;   // dt in "60fps frames"
   last = now;
   dt = clamp(dt, 0, 3);              // don't explode after a tab switch
