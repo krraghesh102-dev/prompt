@@ -142,6 +142,21 @@
   }
   .pausePanel .menuBtns button { min-width: 240px; padding: 13px 26px; }
   #paused, #confirm { background: rgba(4,6,4,.72); }   /* battlefield stays visible */
+  /* landing-page wallet: reads the save, never its own copy of the numbers */
+  .wallet {
+    display: flex; justify-content: center; gap: 10px; flex-wrap: wrap;
+    margin: 0 auto 14px;
+  }
+  .wallet span {
+    display: inline-flex; align-items: center; gap: 7px;
+    background: rgba(12,16,10,.85); border: 2px solid #34402a;
+    padding: 6px 14px; font-size: 15px; letter-spacing: 2px;
+    font-variant-numeric: tabular-nums;
+  }
+  .wallet .coin { color: #ffd76a; border-color: #6b5a2a; }
+  .wallet .gem  { color: #8cf0ff; border-color: #2c5a66; }
+  .wallet .coin::before { content: "\25CF"; font-size: 13px; }
+  .wallet .gem::before  { content: "\25C6"; font-size: 13px; }
   .stack { display: flex; flex-direction: column; gap: 9px; width: 100%; }
 
   .results { display: grid; grid-template-columns: 1fr auto; gap: 5px 18px; font-size: 13px;
@@ -170,6 +185,8 @@
     .bigStars { font-size: 30px; margin: 4px 0 10px; }
     .results { font-size: 12px; margin-bottom: 12px; }
     .menuBtns button { min-width: 200px; }
+    .wallet { gap: 7px; margin-bottom: 8px; }
+    .wallet span { padding: 4px 10px; font-size: 12px; letter-spacing: 1px; }
     .pausePanel { padding: 14px 16px; max-width: 340px; }
     .pausePanel .menuBtns button { min-width: 190px; padding: 12px 18px; font-size: 13px; }
     .upCard { min-height: 110px; padding: 10px 8px; gap: 4px; }
@@ -184,6 +201,7 @@
 
 <div id="menu" class="overlay">
   <div class="panel">
+    <div class="wallet"><span class="coin" id="menuCoins">0</span><span class="gem" id="menuGems">0</span></div>
     <h1>DEAD ZONE</h1>
     <div class="sub">SURVIVE THE WAVES · CLEAR THE HORDE</div>
     <div class="menuBtns">
@@ -386,6 +404,9 @@ function checkOrientation() {
     pausedEl.classList.remove("hidden");   // back in landscape: resume deliberately
   }
 }
+// a refresh or a backgrounded tab must not drop a pending currency write
+addEventListener("pagehide", () => Progress.flush());
+addEventListener("visibilitychange", () => { if (document.hidden) Progress.flush(); });
 window.addEventListener("resize", () => { resize(); checkOrientation(); });
 window.addEventListener("orientationchange", () => setTimeout(() => { resize(); checkOrientation(); }, 250));
 
@@ -872,6 +893,7 @@ const Progress = {
     }
   },
   save() {
+    this.dirty = false;
     try { localStorage.setItem(SAVE_KEY, JSON.stringify(this.data)); }
     catch (e) { /* private mode: progress just will not persist */ }
   },
@@ -891,9 +913,17 @@ const Progress = {
     return true;
   },
   /* Currency is banked immediately on pickup and never rolled back -- not on
-     death, not on a stage restart, not on a world change. */
-  addCoins(n) { this.data.coins = Math.max(0, (this.data.coins | 0) + n); this.save(); return this.data.coins; },
-  addGems(n)  { this.data.gems  = Math.max(0, (this.data.gems  | 0) + n); this.save(); return this.data.gems; },
+     death, not on a stage restart, not on a world change.
+
+     The in-memory total updates at once, so every read is correct straight
+     away, but the localStorage write is coalesced: a coin is granted per
+     kill, and serialising the whole save forty times in the frame an
+     explosion clears a horde cost more than a frame's budget on its own. */
+  dirty: false,
+  addCoins(n) { this.data.coins = Math.max(0, (this.data.coins | 0) + n); this.dirty = true; return this.data.coins; },
+  addGems(n)  { this.data.gems  = Math.max(0, (this.data.gems  | 0) + n); this.dirty = true; return this.data.gems; },
+  /* Write out anything pending. Cheap when nothing changed. */
+  flush() { if (this.dirty) { this.dirty = false; this.save(); } },
   hasAbility(id) { return (this.data.abilities || []).includes(id); },
   unlockAbility(id) {
     if (this.hasAbility(id)) return false;
@@ -2291,7 +2321,7 @@ const BOSS_DROPS = {
 
 const LIFE_CONFIG = {
   startingLives: 3,
-  maxLives: 9,
+  maxLives: 4,
   reviveHp: 0.6,        // fraction of max HP restored on a revive
   reviveInvuln: 2200,   // ms of grace so you are not killed again instantly
   reviveClearRadius: 190
@@ -2672,6 +2702,23 @@ function impactBurst(x, y, ux, uy, n, colors, speed, life) {
     const sp = rand(speed[0], speed[1]);
     particles.push(new Particle(x, y, Math.cos(a) * sp, Math.sin(a) * sp,
       rand(1.4, 3), pick(colors), rand(life[0], life[1])));
+  }
+}
+
+/* One coin per confirmed kill. The float is aggregated over a short window
+   rather than spawned per kill, so clearing a horde costs one small piece of
+   text instead of dozens. */
+const KILL_COIN = 1;
+let coinFloatPending = 0, coinFloatAt = 0;
+let killSfxAt = 0;
+function awardKillCoin() {
+  Progress.addCoins(KILL_COIN);
+  coinFloatPending += KILL_COIN;
+  if (game.time >= coinFloatAt) {
+    floats.push(new FloatText(player.x + rand(-10, 10), player.y - 44,
+      "\u25CF +" + coinFloatPending, "#ffd76a", false));
+    coinFloatPending = 0;
+    coinFloatAt = game.time + 260;
   }
 }
 
@@ -3242,7 +3289,8 @@ class Player {
     this.shieldFlash = 0;      // brief flare when it absorbs a hit
     this.blastReady = 0;       // cooldown gate so one click is one blast
     this.powerups = {};        // key -> expiry timestamp (see POWERUPS)
-    this.lives = LIFE_CONFIG.startingLives;   // run-scoped, not saved
+    // clamped, so a config change or an older value can never exceed the cap
+    this.lives = Math.min(LIFE_CONFIG.startingLives, LIFE_CONFIG.maxLives);   // run-scoped, not saved
     // upgrade-derived stats; applyUpgrades() fills these from the save
     this.wstats = null;
     this.armor = 0; this.staminaMax = 100; this.staminaRegen = 0.30;
@@ -3670,13 +3718,21 @@ class Zombie {
       player.hp = Math.min(player.maxHp, player.hp + player.lifesteal);
     }
     game.kills++;
+    // The single place a kill is confirmed, so this is the single place the
+    // kill coin is granted: exactly one per enemy, whatever killed it and
+    // however much damage it took. A physical coin drop is a separate,
+    // additional source (see the drop table below).
+    awardKillCoin();
     game.combo++;
     game.comboTimer = 2200;
     if (game.combo > game.maxCombo) game.maxCombo = game.combo;
     const mult = 1 + Math.min(1.5, Math.floor(game.combo / 5) * 0.25);
     const pts = Math.round(this.t.points * mult);
     game.addScore(pts, this.x, this.y, mult > 1);
-    SFX.kill();
+    // Forty kill sounds in one instant is 40 noise buffers -- measured at
+    // 15ms of a 16.7ms frame when an explosion clears a horde -- and it is
+    // just a smear acoustically. One per short window says the same thing.
+    if (game.time >= killSfxAt) { killSfxAt = game.time + 55; SFX.kill(); }
     const C = COMBAT_FEEDBACK_CONFIG;
     for (let i = 0; i < fxCount(C.killParticles); i++) {
       const a = rand(0, TAU), s = rand(1, 6);
@@ -4304,6 +4360,11 @@ class Pickup {
     this.life = 14000; this.dead = false; this.bob = rand(0, TAU);
     this.vx = 0; this.vy = 0; this.magnetized = false;
   }
+  /* The collection block marks a pickup dead before it works out what the
+     reward is. A reward that declines to be taken puts that back, so the
+     item simply stays in the world. */
+  uncollect() { this.dead = false; }
+
   update(dt) {
     // Collected or expired means finished. Without this a pickup that is
     // dead but not yet filtered out of the array could be updated again,
@@ -4366,14 +4427,12 @@ class Pickup {
         return;
       }
       if (this.kind === "heart") {
-        // capped, and the cap is checked here as well as at spawn time
-        if (player.lives < LIFE_CONFIG.maxLives) {
-          player.lives++;
-          game.toast("+1 LIFE  \u00b7  " + player.lives, "#ff5a7a");
-        } else {
-          game.addScore(150, this.x, this.y, true);
-          game.toast("LIVES FULL  +150", "#ff5a7a");
-        }
+        // At the cap the heart is NOT consumed -- it stays on the ground so
+        // it is still there once a life has been spent. undead() puts back
+        // the flag the collection block already set.
+        if (player.lives >= LIFE_CONFIG.maxLives) { this.uncollect(); return; }
+        player.lives = Math.min(LIFE_CONFIG.maxLives, player.lives + 1);
+        game.toast("+1 LIFE  \u00b7  " + player.lives + "/" + LIFE_CONFIG.maxLives, "#ff5a7a");
         pickupBurst(this.x, this.y, "#ff5a7a", 12);
         SFX.heart();
         return;
@@ -4954,6 +5013,7 @@ const game = {
   over() {
     if (this.state === "over") return;
     this.state = "over";
+    Progress.flush();
     SFX.death();
     if (this.score > this.best) {
       this.best = this.score;
@@ -5003,8 +5063,19 @@ function hideAllScreens() {
 const stars = n => "\u2605".repeat(n) + "\u2606".repeat(3 - n);
 const $ = id => document.getElementById(id);
 
+/* The landing page reads the save directly every time it is shown -- there
+   is no second copy of the totals to drift out of date. */
+function refreshWallet() {
+  const c = $("menuCoins"), g = $("menuGems");
+  if (!c || !g) return;
+  c.textContent = (Progress.data.coins | 0).toLocaleString();
+  g.textContent = (Progress.data.gems | 0).toLocaleString();
+}
+
 function goMenu() {
   game.state = "menu";
+  Progress.flush();          // the menu shows the totals, so bank them first
+  refreshWallet();
   hideAllScreens(); showScreen("menu");
   checkOrientation();
 }
@@ -5813,22 +5884,22 @@ function drawHUD(g) {
       "HP " + Math.ceil(player.hp));
   // stamina
   bar(g, 16, 38, 140, 7, player.stamina / player.staminaMax, "#4aa3c7", "rgba(0,0,0,.5)");
-  // lives -- small hearts beside the bars, where survival state already lives
+  // lives -- one slot per possible life, filled or empty, so the cap is
+  // visible at a glance rather than only when you hit it
   {
-    const n = Math.min(player.lives, 5);
-    for (let i = 0; i < n; i++) {
+    for (let i = 0; i < LIFE_CONFIG.maxLives; i++) {
       const hx = 166 + i * 15, hy = 41;
-      g.fillStyle = "#ff5a7a";
+      const held = i < player.lives;
       g.beginPath();
       g.moveTo(hx, hy + 4);
       g.bezierCurveTo(hx - 6, hy - 1.5, hx - 3.2, hy - 6, hx, hy - 2);
       g.bezierCurveTo(hx + 3.2, hy - 6, hx + 6, hy - 1.5, hx, hy + 4);
-      g.closePath(); g.fill();
+      g.closePath();
+      if (held) { g.fillStyle = "#ff5a7a"; g.fill(); }
+      else { g.strokeStyle = "rgba(255,90,122,.38)"; g.lineWidth = 1.3; g.stroke(); }
     }
-    if (player.lives > 5) {
-      g.fillStyle = "#ff5a7a"; g.font = "bold 11px 'Courier New', monospace"; g.textAlign = "left";
-      g.fillText("x" + player.lives, 166 + 5 * 15 + 2, 44);
-    }
+    g.fillStyle = "#9aa694"; g.font = "bold 10px 'Courier New', monospace"; g.textAlign = "left";
+    g.fillText(player.lives + "/" + LIFE_CONFIG.maxLives, 166 + LIFE_CONFIG.maxLives * 15 + 3, 45);
   }
 
   // weapon + ammo
@@ -6498,12 +6569,15 @@ function render() {
 
 /* ---------------- loop ---------------- */
 let last = performance.now();
+let nextSaveAt = 0;
 let wasPlaying = false;
 function frame(now) {
   // any time gameplay resumes -- from pause, a menu, a restart -- the wall
   // time spent away must not arrive as one giant delta
   if (game.state === "play" && !wasPlaying) last = now;
   wasPlaying = game.state === "play";
+  // coalesced currency writes: at most one serialise every half second
+  if (Progress.dirty && now > nextSaveAt) { nextSaveAt = now + 500; Progress.flush(); }
   let dt = (now - last) / 16.6667;   // dt in "60fps frames"
   last = now;
   dt = clamp(dt, 0, 3);              // don't explode after a tab switch
@@ -6529,6 +6603,7 @@ function frame(now) {
 resize();
 game.reset();
 applyUpgrades();
+refreshWallet();
 goMenu();
 requestAnimationFrame(frame);
 </script>

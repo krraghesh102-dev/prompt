@@ -337,8 +337,8 @@ did, so nothing new can push an existing drop out of the table.
 
 | Drop | What it does | Base chance |
 |---|---|---|
-| ❤ **Heart** | +1 life (never HP) | 1.5% |
-| ● **Coins** | 5–25 banked currency | 8% |
+| ❤ **Heart** | +1 life (never HP), max 4 | 1.5% |
+| ● **Coins** | 5–25 banked currency, on top of the 1/kill | 8% |
 | 🔥 **Damage boost** | ×2 weapon damage, 10s | 2.5% |
 | ⧗ **Slow motion** | game runs at 45%, 6s | 1.5% |
 | ◆ **Rare gem** | +100 gems | 0.3% |
@@ -350,14 +350,36 @@ brutes drop more coins and boosts, spitters more slow motion, stalkers more
 gems. A boss is the one guaranteed payday (`BOSS_DROPS`) — coins and a heart
 every time, the rest on good odds, deliberately *not* everything at once.
 
-**Lives** are run-scoped, not saved: you start with 3. Dying with a life in
-hand spends it and revives you in place at 60% health with 2.2s of grace and
-a shove that clears the pack, instead of ending the run; at zero it is the
-normal game-over flow, and Retry is untouched. Capped at 9 — a heart at the
-cap pays score instead. Works the same in campaign and endless.
+**Lives** are run-scoped, not saved: you start with 3, **capped at 4**.
+Dying with a life in hand spends it and revives you in place at 60% health
+with 2.2s of grace and a shove that clears the pack, instead of ending the
+run; at zero it is the normal game-over flow, and Retry is untouched. The
+HUD shows every slot — filled hearts and hollow ones — plus `3/4`, so the
+cap is visible before you hit it. A heart collected at the cap is **not
+consumed**: it stays on the ground and is still there once you have spent a
+life. Works the same in campaign and endless.
 
-**Coins and gems are separate currencies**, banked the instant you touch the
-pickup and never rolled back — not on death, not on a stage restart, not on
+**Every confirmed kill pays 1 coin**, granted in `die()` — the one place a
+death is finalised — so it is exactly one per enemy whatever killed it: one
+for seven shotgun pellets into the same zombie, ten for an explosion that
+takes ten, none for damage that does not kill. That is separate from and
+additional to a physical coin pickup, which pays its own 5–25 on collection.
+The feedback is aggregated over a ~260ms window into a single float, so
+clearing a horde costs one small piece of text rather than dozens.
+
+Currency writes are **coalesced**: the in-memory total updates immediately,
+so every read is correct at once, but the localStorage write happens at most
+twice a second (and instantly on `pagehide`, when the tab is hidden, on game
+over and on returning to the menu). Serialising the whole save once per kill
+cost more than a frame's budget on its own when an explosion cleared a
+horde.
+
+Both totals are shown on the **landing page**, read straight from the save
+each time the menu opens — there is no second copy to drift. A save without
+the keys shows 0 and loses nothing else.
+
+**Coins and gems are separate currencies**, banked the instant they are
+earned and never rolled back — not on death, not on a stage restart, not on
 a world change. They live in the existing campaign save (`coins`, `gems`); a
 save written before they existed loads with zero and keeps everything else.
 
