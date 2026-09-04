@@ -20,6 +20,7 @@ Open `index.html` in any modern browser. That's it.
 | `G` | Throw grenade |
 | `F` | Raise security layer (shield) |
 | `Q` | Power blast |
+| `X` | Air strike — then click a target (`Esc` / right-click cancels) |
 | `P` / `Esc` | Pause / resume |
 
 ## On a phone
@@ -36,7 +37,7 @@ lands, so there is no fixed pad to hunt for.
 | **Right half** — quick tap | Fire at the exact spot you tapped |
 | On-screen buttons (top-left) | Weapon slots, reload |
 | Pause button (top-right) | Open the pause menu |
-| On-screen buttons (bottom-right) | Grenade, shield, power blast |
+| On-screen buttons (bottom-right) | Grenade, shield, power blast, air strike |
 
 Both thumbs work at once, so you can retreat while firing behind you.
 
@@ -185,7 +186,7 @@ tanks or an endless screamer chain.
 Endless keeps a **separate** ladder that unlocks types by wave number, so it
 still starts simple and reaches the full roster around wave 21.
 
-**Armory** — three guns, plus three limited-charge items.
+**Armory** — three guns, plus four limited-charge items.
 
 *Guns* — nine weapons, unlocked across the campaign. Each has a distinct job;
 none is simply a better version of the last.
@@ -214,7 +215,7 @@ weapon you're holding. Unlocks are permanent and saved.
 
 *Gear* — each has limited charges, shown bottom-right. Charges drop from
 kills and top up between waves (a grenade every wave, a shield every third,
-a blast every fourth).
+a blast every fourth, an air strike every sixth).
 
 - **Grenade** (`G`) — thrown along your aim, ~0.8s fuse, bounces off walls.
   118px blast with damage falling off to the rim. It **will hurt you** at
@@ -223,17 +224,48 @@ a blast every fourth).
   for 6.5 seconds, bites and acid included. A ring around you counts the
   time down. Using it while already up extends the timer rather than
   restarting it, so a charge is never wasted.
-Each of the three locks while its own effect runs: a second press — click,
+Each of the four locks while its own effect runs: a second press — click,
 double-click, held key, or rapid tap — is ignored outright and costs no
 charge. The card dims and shows a progress strip until the effect ends. The
 lock is derived from state each ability already keeps (a grenade in flight,
-the shield expiry, the blast cooldown), so it can never disagree with what
-is actually happening.
+the shield expiry, the blast cooldown, the air strike phase), so it can
+never disagree with what is actually happening. Air strike holds its lock
+across the *whole* call-in — targeting, the approach, every explosion and
+the settle — and its charge is spent only when the target is confirmed.
 
 - **Power blast** (`Q`) — an instant 210px shockwave centered on you.
   Heavy damage with falloff plus a hard shove outward, and it never hurts
   you. Clears a surrounding pack of walkers outright. Short cooldown so one
   press spends exactly one charge.
+- **Air strike** (`X`) — the ranged one. Unlocked at **World 2 Stage 1**,
+  max 2 charges, and its card only appears once the campaign has granted it
+  (the same rule the weapon slots use). Pressing it opens *targeting*, it
+  does not drop anything: a dashed radius and reticle follow your cursor
+  (or your thumb), clamped to the battlefield. Confirm and an aircraft runs
+  in from the side and walks **six** explosions across the target, each
+  announced by a closing ground marker a moment before it lands. 86px
+  radius and 130 damage per bomb, overlapping enough that a single target
+  takes two or three of them; it never hurts you.
+
+  Where blast is instant and centred on you, air strike is delayed, aimed
+  and much wider — a crowd and boss answer rather than a panic button.
+  Cancelling before you confirm (`Esc`, right-click, or the on-screen
+  CANCEL) costs nothing.
+
+  | Input | Targeting | Confirm | Cancel |
+  |---|---|---|---|
+  | Desktop | mouse moves the reticle | left click | `Esc` or right-click |
+  | Mobile | tap or drag to place | tap again | CANCEL button |
+
+  While targeting, the weapon will not fire and the rest of the gear row is
+  inert, so a stray tap cannot throw a grenade mid-aim. `Esc` cancels
+  targeting rather than pausing. It starts with no charges — unlike the
+  other three — so the first one is earned from a wave top-up or a drop.
+
+  Pausing mid-call-in freezes the aircraft, the warning timers and the
+  remaining explosions, and resuming continues from the same point rather
+  than skipping ahead; the impact points are decided at confirmation, so a
+  pause cannot reshuffle where the bombs land.
 
 **Scoring** — kills award points, and a kill streak builds a combo multiplier
 (up to 2.5x) that decays if you stop killing. Clearing a wave pays a bonus

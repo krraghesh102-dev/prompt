@@ -205,11 +205,12 @@
       <div><b>R</b> — reload &nbsp;·&nbsp; <b>1-9</b> — pick weapon &nbsp;·&nbsp; <b>E / Z</b> — cycle</div>
       <div><b>Shift</b> — sprint &nbsp;·&nbsp; <b>P / Esc</b> — pause</div>
       <div><b>G</b> — grenade &nbsp;·&nbsp; <b>F</b> — shield &nbsp;·&nbsp; <b>Q</b> — power blast</div>
+      <div><b>X</b> — air strike, then click a target (<b>Esc</b> / right-click cancels)</div>
       <div style="margin-top:8px;color:#7dd53f">ON A PHONE</div>
       <div><b>Left half</b> — drag anywhere to move (push far to sprint)</div>
       <div><b>Right half</b> — drag to aim and fire, or tap a target</div>
       <div><b>On-screen buttons</b> — weapons, reload, pause</div>
-      <div><b>Bottom-right</b> — grenade, shield, power blast</div>
+      <div><b>Bottom-right</b> — grenade, shield, power blast, air strike</div>
     </div>
     <button class="ghost" id="howBack">BACK</button>
   </div>
@@ -406,6 +407,9 @@ addEventListener("keydown", e => {
   const k = e.key.toLowerCase();
   keys[k] = true;
   if (["arrowup","arrowdown","arrowleft","arrowright"," "].includes(k)) e.preventDefault();
+  // ESC belongs to targeting while it is open: aborting a strike must never
+  // also pause the game
+  if (k === "escape" && airStrikeTargeting()) { cancelAirStrikeTargeting(); e.preventDefault(); return; }
   if (k === "p" || k === "escape") togglePause();
   if (k === "r") player.reload();
   if (k >= "1" && k <= "9") player.selectWeapon(+k - 1);
@@ -415,6 +419,7 @@ addEventListener("keydown", e => {
     if (k === "g") player.useItem("grenade");
     if (k === "f") player.useItem("shield");
     if (k === "q") player.useItem("blast");
+    if (k === "x") player.useItem("airstrike");
   }
 });
 addEventListener("keyup", e => { keys[e.key.toLowerCase()] = false; });
@@ -424,17 +429,28 @@ function toWorld(cx, cy) {
   const r = canvas.getBoundingClientRect();
   return { x: (cx - r.left) / scale, y: (cy - r.top) / scale };
 }
-canvas.addEventListener("mousemove", e => { const p = toWorld(e.clientX, e.clientY); mouse.x = p.x; mouse.y = p.y; });
+canvas.addEventListener("mousemove", e => {
+  const p = toWorld(e.clientX, e.clientY); mouse.x = p.x; mouse.y = p.y;
+  if (airStrikeTargeting()) moveAirStrikeTarget(p.x, p.y);   // reticle follows the cursor
+});
 canvas.addEventListener("mousedown", e => {
   if (e.button !== 0) return;
   const p = toWorld(e.clientX, e.clientY);
   const btn = hitButton(p.x, p.y);
   if (btn) { pressButton(btn); return; }
   if (game.state !== "play") return;   // paused / on a menu: never shoot
+  if (airStrikeTargeting()) {          // this click picks the target, it does not fire
+    moveAirStrikeTarget(p.x, p.y);
+    confirmAirStrike();
+    return;
+  }
   mouse.down = true; fireQueued = true;
 });
 addEventListener("mouseup", e => { if (e.button === 0) mouse.down = false; });
-canvas.addEventListener("contextmenu", e => e.preventDefault());
+canvas.addEventListener("contextmenu", e => {
+  e.preventDefault();
+  cancelAirStrikeTargeting();          // right click aborts targeting, free of charge
+});
 
 /* on-screen buttons (rebuilt each HUD draw, hit-tested before move/aim) */
 let TOUCH_UI = false;          // flips on once a real touch is seen
@@ -448,6 +464,10 @@ function hitButton(x, y) {
 function pressButton(b) {
   if (b.id === "pause") { togglePause(); return; }
   if (game.state !== "play") return;    // stale HUD buttons stay inert off-play
+  if (b.id === "asCancel") { cancelAirStrikeTargeting(); return; }
+  // while a target is being picked the rest of the HUD is inert, so a stray
+  // tap cannot throw a grenade or swap weapons mid-aim
+  if (airStrikeTargeting()) return;
   if (b.id === "reload") player.reload();
   else if (b.id.startsWith("item:")) player.useItem(b.id.slice(5));
   else if (b.id.startsWith("w")) player.selectWeapon(+b.id.slice(1));
@@ -472,6 +492,16 @@ function handleTouchStart(e) {
     const p = toWorld(t.clientX, t.clientY);
     const btn = hitButton(p.x, p.y);
     if (btn) { pressButton(btn); continue; }
+    if (airStrikeTargeting()) {
+      // the whole battlefield is the targeting surface: this finger drags
+      // the reticle, and lifting it is the tap that counts
+      if (airStrike.touchId === null) {
+        airStrike.touchId = t.identifier;
+        airStrike.taps++;
+        moveAirStrikeTarget(p.x, p.y);
+      }
+      continue;                        // never reaches the move / aim sticks
+    }
     if (p.x < W / 2) {
       if (touch.moveId === null) {
         touch.moveId = t.identifier; touch.mx = p.x; touch.my = p.y;
@@ -490,6 +520,10 @@ function handleTouchStart(e) {
 function handleTouchMove(e) {
   for (const t of e.changedTouches) {
     const p = toWorld(t.clientX, t.clientY);
+    if (airStrikeTargeting()) {
+      if (t.identifier === airStrike.touchId) moveAirStrikeTarget(p.x, p.y);
+      continue;
+    }
     if (t.identifier === touch.moveId) {
       let dx = p.x - touch.mx, dy = p.y - touch.my;
       const m = Math.hypot(dx, dy) || 1;
@@ -510,6 +544,12 @@ function handleTouchMove(e) {
 }
 function handleTouchEnd(e) {
   for (const t of e.changedTouches) {
+    if (airStrikeTargeting() && t.identifier === airStrike.touchId) {
+      airStrike.touchId = null;
+      // first tap places the marker so it can be judged; the second fires
+      if (airStrike.taps >= 2) confirmAirStrike();
+      continue;
+    }
     if (t.identifier === touch.moveId) { touch.moveId = null; touch.active = false; touch.dx = touch.dy = 0; }
     if (t.identifier === touch.aimId) {
       touch.aimId = null; touch.aimActive = false; touch.aimDragged = false;
@@ -578,6 +618,8 @@ const SFX = {
   scream:  () => { blip("sawtooth", 620, 0.45, 0.09, 140); noise(0.3, 0.08, 900); },
   magnet:  () => { blip("sine", 520, 0.10, 0.06, 880); setTimeout(() => blip("sine", 880, 0.14, 0.05, 1250), 90); },
   slurp:   () => blip("sine", 700, 0.05, 0.035, 1100),
+  airstrike:() => { blip("sawtooth", 300, 0.55, 0.07, 120); noise(0.5, 0.06, 600); },
+  jet:     () => { noise(0.35, 0.07, 500); },
   blast:   () => { noise(0.7, 0.32, 1600); blip("sawtooth", 150, 0.6, 0.15, 34);
                    setTimeout(() => blip("square", 90, 0.35, 0.10, 30), 90); }
 };
@@ -591,8 +633,34 @@ const ITEMS = {
   shield:  { name: "SHIELD",  key: "F", max: 3, start: 1, color: "#5fd0ff",
              duration: 6500 },
   blast:   { name: "BLAST",   key: "Q", max: 3, start: 1, color: "#ff8de0",
-             radius: 210, dmg: 260, knock: 26, cooldown: 900 }
+             radius: 210, dmg: 260, knock: 26, cooldown: 900 },
+  airstrike: { name: "AIR STRIKE", key: "X", max: 2, start: 0, color: "#ff9a3c" }
 };
+
+/* Air strike tuning. Every number the sequence uses lives here so the
+   ability can be rebalanced without touching the state machine. */
+const AIR_STRIKE_CONFIG = {
+  strikes: 6,                 // explosions per call-in
+  // spread and radius are tuned together: the ring has to overlap the centre
+  // or a single target sits in the gap and the strike feels weaker than a
+  // grenade. At these values a point target takes two or three of the six.
+  targetSpread: 118,          // how far strikes scatter from the reticle
+  explosionRadius: 86,        // damage radius of one explosion
+  damage: 130,                // damage at the centre of one explosion
+  knock: 18,
+  delayBetweenStrikes: 180,   // ms between consecutive impacts
+  warning: 520,               // ms a ground marker glows before its impact
+  flyIn: 700,                 // ms from confirmation to the first impact
+  cleanup: 420,               // ms of settle time after the last impact
+  planeSpeed: [8, 20],        // world px per 60fps frame, clamped
+  reticleRadius: 150          // drawn area of effect while targeting
+};
+
+/* Abilities unlock on the campaign schedule, exactly like weapons: same
+   rank maths, same permanent save, so progression stays one system. */
+const ABILITY_UNLOCKS = [
+  { id: "airstrike", world: 2, stage: 1 }
+];
 
 
 /* ================= CAMPAIGN DATA =================
@@ -702,7 +770,8 @@ const Progress = {
       });
       worlds[w.id] = { unlocked: UNLOCK_ALL || w.id === 1, completed: false, introSeen: false, stages };
     }
-    return { version: 1, worlds, highestWave: 0, weapons: ["pistol"], upgrades: {}, seenMagnet: false };
+    return { version: 1, worlds, highestWave: 0, weapons: ["pistol"], abilities: [],
+             upgrades: {}, seenMagnet: false };
   },
   load() {
     try {
@@ -765,6 +834,13 @@ const Progress = {
         if (typeof id === "string" && !base.weapons.includes(id)) base.weapons.push(id);
       }
     }
+    // saves written before air strike existed simply have no list yet
+    base.abilities = [];
+    if (Array.isArray(saved.abilities)) {
+      for (const id of saved.abilities) {
+        if (typeof id === "string" && !base.abilities.includes(id)) base.abilities.push(id);
+      }
+    }
     return base;
   },
   /* Opens everything while UNLOCK_ALL is set. Only the `unlocked` flags are
@@ -793,6 +869,13 @@ const Progress = {
   unlockWeapon(id) {
     if (this.hasWeapon(id)) return false;
     this.data.weapons.push(id);
+    this.save();
+    return true;
+  },
+  hasAbility(id) { return (this.data.abilities || []).includes(id); },
+  unlockAbility(id) {
+    if (this.hasAbility(id)) return false;
+    this.data.abilities.push(id);
     this.save();
     return true;
   }
@@ -2196,6 +2279,9 @@ function abilityActive(kind) {
   if (kind === "grenade") return grenades.length > 0;              // still in flight
   if (kind === "shield")  return player.shielded;                  // barrier up
   if (kind === "blast")   return game.time < player.blastReady;    // shockwave settling
+  // air strike owns one phase field covering targeting, the approach, every
+  // explosion and the settle, so the card stays locked for the whole call-in
+  if (kind === "airstrike") return airStrike.phase !== "idle";
   return false;
 }
 
@@ -2207,7 +2293,145 @@ function abilityLockFrac(kind) {
   }
   if (kind === "shield") return clamp((player.shieldUntil - game.time) / ITEMS.shield.duration, 0, 1);
   if (kind === "blast")  return clamp((player.blastReady - game.time) / ITEMS.blast.cooldown, 0, 1);
+  if (kind === "airstrike") {
+    if (airStrike.phase === "idle") return 0;
+    if (airStrike.phase === "targeting") return 1;                 // full bar while aiming
+    return clamp(1 - airStrike.elapsed / airStrike.endsAt, 0, 1);
+  }
   return 0;
+}
+
+
+/* ================= AIR STRIKE =================
+   One state object is the whole ability. `phase` is authoritative: it gates
+   activation (through abilityActive), suppresses the weapon while aiming,
+   and drives every visual. Because updateAirStrike() is only reached from
+   update(), which runs only in the "play" state, pausing freezes the plane,
+   the warning markers and every impact timer together -- and resuming
+   continues from the same elapsed time rather than skipping ahead.
+
+   idle -> targeting -> inbound -> striking -> cleanup -> idle          */
+const airStrike = {
+  phase: "idle",
+  tx: 0, ty: 0,          // reticle / confirmed target, in world coordinates
+  elapsed: 0,            // ms into the confirmed sequence
+  endsAt: 0,             // ms the whole sequence lasts
+  marks: [],             // precomputed impacts: { x, y, at, done }
+  plane: null,           // { x, y, vx, dir }
+  touchId: null,         // the finger currently placing the reticle
+  taps: 0                // tap 1 places, tap 2 confirms (mobile)
+};
+
+function airStrikeTargeting() { return airStrike.phase === "targeting"; }
+
+/* Owned only once the campaign has granted it. Endless inherits whatever
+   the campaign earned, exactly like the weapon arsenal does. */
+function hasAirStrike() { return Progress.hasAbility("airstrike"); }
+
+/* Reticle can never leave the battlefield, whatever the input said. */
+function moveAirStrikeTarget(x, y) {
+  const m = 26;
+  airStrike.tx = clamp(x, m, W - m);
+  airStrike.ty = clamp(y, m, H - m);
+}
+
+function beginAirStrikeTargeting() {
+  airStrike.phase = "targeting";
+  airStrike.taps = 0;
+  airStrike.touchId = null;
+  airStrike.marks.length = 0;
+  airStrike.plane = null;
+  airStrike.elapsed = 0;
+  // start under the reticle the player already has, so the marker does not
+  // jump in from a corner
+  moveAirStrikeTarget(mouse.x, mouse.y);
+  game.toast("SELECT TARGET", ITEMS.airstrike.color);
+}
+
+/* Cancelling costs nothing: no charge is spent until confirmAirStrike(). */
+function cancelAirStrikeTargeting() {
+  if (!airStrikeTargeting()) return false;
+  airStrike.phase = "idle";
+  airStrike.touchId = null;
+  airStrike.taps = 0;
+  game.toast("STRIKE ABORTED", "#9aa694");
+  return true;
+}
+
+/* The only place an air strike charge is spent. Re-entry is impossible: the
+   phase leaves "targeting" synchronously, and abilityActive() reports the
+   ability locked from here until cleanup finishes. */
+function confirmAirStrike() {
+  if (!airStrikeTargeting()) return false;
+  if (player.items.airstrike <= 0) { cancelAirStrikeTargeting(); return false; }
+  player.items.airstrike--;
+
+  const c = AIR_STRIKE_CONFIG;
+  const n = Math.max(1, Math.round(player.airStrikes || c.strikes));
+  const spread = c.targetSpread * (player.airSpread || 1);
+  const tx = airStrike.tx, ty = airStrike.ty;
+
+  // Impacts are decided once, here, so a pause mid-run cannot reshuffle
+  // where the bombs land. First one is dead centre; the rest ring it.
+  const pts = [{ x: tx, y: ty }];
+  for (let i = 1; i < n; i++) {
+    const ang = (i / (n - 1)) * TAU + rand(-0.35, 0.35);
+    const rad = spread * (0.45 + Math.random() * 0.55);
+    pts.push({ x: clamp(tx + Math.cos(ang) * rad, 10, W - 10),
+               y: clamp(ty + Math.sin(ang) * rad, 10, H - 10) });
+  }
+
+  const dir = tx < W / 2 ? 1 : -1;                 // fly the longer way over the field
+  // bombs land along the plane's path, so the run reads left to right
+  pts.sort((p, q) => (p.x - q.x) * dir);
+
+  airStrike.marks = pts.map((p, i) => ({ x: p.x, y: p.y, at: c.flyIn + i * c.delayBetweenStrikes, done: false }));
+  airStrike.endsAt = c.flyIn + (n - 1) * c.delayBetweenStrikes + c.cleanup;
+  airStrike.elapsed = 0;
+  airStrike.phase = "inbound";
+  airStrike.touchId = null;
+
+  const x0 = dir > 0 ? -150 : W + 150;
+  const vx = clamp(Math.abs(tx - x0) * 16.6 / c.flyIn, c.planeSpeed[0], c.planeSpeed[1]) * dir;
+  airStrike.plane = { x: x0, y: 44 + Math.random() * 26, vx, dir };
+
+  game.toast("AIR STRIKE INBOUND", ITEMS.airstrike.color);
+  SFX.airstrike();
+  return true;
+}
+
+function updateAirStrike(dt) {
+  if (airStrike.phase === "idle" || airStrike.phase === "targeting") return;
+  const ms = dt * 16.6;
+  airStrike.elapsed += ms;
+  if (airStrike.plane) airStrike.plane.x += airStrike.plane.vx * dt;
+
+  const c = AIR_STRIKE_CONFIG;
+  for (const m of airStrike.marks) {
+    if (m.done || airStrike.elapsed < m.at) continue;
+    m.done = true;
+    airStrike.phase = "striking";
+    // reuse the shared explosion: same damage falloff, death, score, combo
+    // and boss handling as every other explosive in the game
+    explode(m.x, m.y, player.airRadius || c.explosionRadius,
+            player.airDamage || c.damage, c.knock, "#ff9a3c", true);
+    SFX.boom();
+  }
+  if (airStrike.elapsed >= airStrike.endsAt) {
+    airStrike.phase = "idle";
+    airStrike.marks.length = 0;
+    airStrike.plane = null;
+  } else if (airStrike.phase === "inbound" && airStrike.marks.every(m => m.done)) {
+    airStrike.phase = "cleanup";
+  }
+}
+
+function resetAirStrike() {
+  airStrike.phase = "idle";
+  airStrike.marks.length = 0;
+  airStrike.plane = null;
+  airStrike.elapsed = 0; airStrike.endsAt = 0;
+  airStrike.touchId = null; airStrike.taps = 0;
 }
 
 
@@ -2422,7 +2646,8 @@ const FEATURES = {
   stamina:  () => true,
   crit:     () => true,                       // implemented below, always live
   pickups:  () => true,
-  magnet:   () => !!(Progress.data && Progress.data.seenMagnet)   // only once one has been collected
+  magnet:   () => !!(Progress.data && Progress.data.seenMagnet),  // only once one has been collected
+  airstrike:() => !!(Progress.data && (Progress.data.abilities || []).includes("airstrike"))
 };
 function featureAvailable(key) { const f = FEATURES[key]; return f ? !!f() : false; }
 
@@ -2500,6 +2725,12 @@ const UPGRADES = weaponUpgrades().concat([
   { id: "k:health",  feature: "pickups", name: "MEDKIT POTENCY", icon: "🩹", cat: "pickup",   step: 0.15, max: UPGRADE_MAX, fmt: l => pct(0.15 * l) + " healing" },
   { id: "m:dur",     feature: "magnet",  name: "MAGNET DURATION","icon": "🧲", cat: "pickup", step: 0.15, max: UPGRADE_MAX, fmt: l => pct(0.15 * l) + " magnet time" },
   { id: "m:range",   feature: "magnet",  name: "MAGNET RANGE",   icon: "🧲", cat: "pickup",   step: 0.12, max: UPGRADE_MAX, fmt: l => pct(0.12 * l) + " magnet range" },
+
+  /* Air strike rows are gated on the ability's own unlock, so they cannot be
+     offered to a player who has no air strike card yet. */
+  { id: "a:dmg",    feature: "airstrike", name: "AIR STRIKE DAMAGE", icon: "✈", cat: "airstrike", step: 0.12, max: UPGRADE_MAX, rarity: "rare", fmt: l => pct(0.12 * l) + " strike damage" },
+  { id: "a:radius", feature: "airstrike", name: "WIDER STRIKE",      icon: "✈", cat: "airstrike", step: 0.10, max: UPGRADE_MAX, rarity: "rare", fmt: l => pct(0.10 * l) + " explosion radius" },
+  { id: "a:count",  feature: "airstrike", name: "EXTRA STRIKE",      icon: "✈", cat: "airstrike", step: 1,    max: 3,           rarity: "epic", fmt: l => "+" + l + " bomb per strike" },
 
   /* Universal upgrades touch every unlocked weapon, so they are deliberately
      rarer than the single-weapon rows. */
@@ -2643,6 +2874,11 @@ function applyUpgrades() {
   player.magnetRadius = MAGNET_CONFIG.radius * (1 + 0.12 * L("m:range"));
   player.lifesteal = L("s:vampiric");                    // HP per kill
   player.igniteChance = 0.12 * L("s:incendiary");
+  player.airDamage  = AIR_STRIKE_CONFIG.damage * (1 + 0.12 * L("a:dmg"));
+  player.airRadius  = AIR_STRIKE_CONFIG.explosionRadius * (1 + 0.10 * L("a:radius"));
+  player.airStrikes = AIR_STRIKE_CONFIG.strikes + L("a:count");
+  // more bombs need more ground to land on, or they just stack on the centre
+  player.airSpread  = 1 + 0.08 * L("a:count");
 }
 function wstat(i) { return (player.wstats && player.wstats[i]) || WEAPONS[i]; }
 
@@ -2665,7 +2901,8 @@ class Player {
     this.stamina = 100; this.sprinting = false;
     this.recoil = 0;
     this.walkPhase = 0;
-    this.items = { grenade: ITEMS.grenade.start, shield: ITEMS.shield.start, blast: ITEMS.blast.start };
+    this.items = { grenade: ITEMS.grenade.start, shield: ITEMS.shield.start,
+                   blast: ITEMS.blast.start, airstrike: ITEMS.airstrike.start };
     this.shieldUntil = 0;      // timestamp the security layer drops
     this.shieldFlash = 0;      // brief flare when it absorbs a hit
     this.blastReady = 0;       // cooldown gate so one click is one blast
@@ -2766,6 +3003,12 @@ class Player {
       explode(this.x, this.y, b.radius, b.dmg, b.knock, "#ff8de0", true);
       game.toast("POWER BLAST", b.color);
       SFX.blast();
+
+    } else if (kind === "airstrike") {
+      // opens targeting only. The charge is spent in confirmAirStrike(),
+      // so pressing the button never drops bombs at an arbitrary spot --
+      // and the ability is already locked, because phase left "idle".
+      beginAirStrikeTargeting();
     }
     return true;
   }
@@ -2809,7 +3052,7 @@ class Player {
       this.reloading = false;
     }
 
-    if (mouse.down || fireQueued) {
+    if ((mouse.down || fireQueued) && !airStrikeTargeting()) {
       if ((this.weapon.auto || touch.aimActive) && mouse.down) this.tryShoot();
       else if (!this._heldFire) { this.tryShoot(); this._heldFire = true; }
     }
@@ -3026,6 +3269,7 @@ class Zombie {
     else if (roll < 0.32) pickups.push(new Pickup(this.x, this.y, "grenade"));
     else if (roll < 0.355) pickups.push(new Pickup(this.x, this.y, "shield"));
     else if (roll < 0.375) pickups.push(new Pickup(this.x, this.y, "blast"));
+    else if (roll < 0.385 && hasAirStrike()) pickups.push(new Pickup(this.x, this.y, "airstrike"));
   }
   detonate() {
     if (this._boomed) return;          // never twice, however it died
@@ -3450,6 +3694,123 @@ function explode(x, y, radius, dmg, knock, color, selfSafe) {
   }
 }
 
+/* Air strike visuals: reticle while aiming, ground markers counting down to
+   each impact, and the aircraft overhead. All procedural from the state
+   object and game.time -- nothing is allocated per frame. */
+function drawAirStrike(g) {
+  const c = AIR_STRIKE_CONFIG;
+  const col = ITEMS.airstrike.color;
+
+  if (airStrikeTargeting()) {
+    const x = airStrike.tx, y = airStrike.ty;
+    const pulse = 0.5 + Math.sin(game.time / 160) * 0.5;
+    const R = (player.airSpread ? c.reticleRadius * player.airSpread : c.reticleRadius);
+    g.save();
+    // affected area
+    g.globalAlpha = 0.10 + pulse * 0.07;
+    g.fillStyle = col;
+    g.beginPath(); g.arc(x, y, R, 0, TAU); g.fill();
+    g.globalAlpha = 0.75;
+    g.strokeStyle = col; g.lineWidth = 2;
+    g.setLineDash([10, 8]); g.lineDashOffset = -game.time / 26;
+    g.beginPath(); g.arc(x, y, R, 0, TAU); g.stroke();
+    g.setLineDash([]);
+    // pulsing inner ring
+    g.globalAlpha = 0.5 + pulse * 0.4; g.lineWidth = 1.6;
+    g.beginPath(); g.arc(x, y, 20 + pulse * 9, 0, TAU); g.stroke();
+    // reticle
+    g.globalAlpha = 1; g.lineWidth = 2.4;
+    g.beginPath();
+    g.moveTo(x - 26, y); g.lineTo(x - 9, y);
+    g.moveTo(x + 9, y);  g.lineTo(x + 26, y);
+    g.moveTo(x, y - 26); g.lineTo(x, y - 9);
+    g.moveTo(x, y + 9);  g.lineTo(x, y + 26);
+    g.stroke();
+    g.beginPath(); g.arc(x, y, 3.4, 0, TAU); g.fillStyle = col; g.fill();
+    // corner brackets
+    g.lineWidth = 3;
+    for (let q = 0; q < 4; q++) {
+      const sx = q % 2 ? 1 : -1, sy = q < 2 ? -1 : 1;
+      g.beginPath();
+      g.moveTo(x + sx * R * 0.72, y + sy * R * 0.72 - sy * 14);
+      g.lineTo(x + sx * R * 0.72, y + sy * R * 0.72);
+      g.lineTo(x + sx * R * 0.72 - sx * 14, y + sy * R * 0.72);
+      g.stroke();
+    }
+    g.restore();
+    return;
+  }
+
+  if (airStrike.phase === "idle") return;
+
+  // ground markers: a shrinking ring that closes onto the impact point
+  g.save();
+  for (const m of airStrike.marks) {
+    if (m.done) continue;
+    const left = m.at - airStrike.elapsed;
+    if (left > c.warning) continue;
+    const t = clamp(left / c.warning, 0, 1);          // 1 -> 0 as impact nears
+    const blink = Math.floor(left / 90) % 2 === 0;
+    const R = player.airRadius || c.explosionRadius;
+    g.globalAlpha = 0.30 + (1 - t) * 0.35;
+    g.strokeStyle = blink ? "#ffd76a" : col; g.lineWidth = 2;
+    g.beginPath(); g.arc(m.x, m.y, R, 0, TAU); g.stroke();
+    g.globalAlpha = 0.55;
+    g.lineWidth = 3;
+    g.beginPath(); g.arc(m.x, m.y, 8 + R * t, 0, TAU); g.stroke();   // closing ring
+    g.globalAlpha = 0.9;
+    g.fillStyle = blink ? "#ffd76a" : col;
+    g.beginPath(); g.arc(m.x, m.y, 3.2, 0, TAU); g.fill();
+  }
+  g.restore();
+
+  // the aircraft, and the bombs falling away from it
+  const pl = airStrike.plane;
+  if (pl && pl.x > -190 && pl.x < W + 190) {
+    g.save();
+    g.globalAlpha = 0.22;                              // ground shadow
+    g.fillStyle = "#000";
+    g.beginPath(); g.ellipse(pl.x + 22, pl.y + 34, 24, 6, 0, 0, TAU); g.fill();
+    g.globalAlpha = 1;
+    g.translate(pl.x, pl.y);
+    g.scale(pl.dir, 1);
+    g.fillStyle = "#171b16";
+    g.beginPath();                                     // fuselage
+    g.moveTo(30, 0); g.lineTo(8, -5); g.lineTo(-26, -4);
+    g.lineTo(-32, 0); g.lineTo(-26, 4); g.lineTo(8, 5);
+    g.closePath(); g.fill();
+    g.beginPath();                                     // swept wings
+    g.moveTo(6, -2); g.lineTo(-12, -25); g.lineTo(-19, -25); g.lineTo(-7, -2);
+    g.lineTo(-7, 2); g.lineTo(-19, 25); g.lineTo(-12, 25); g.lineTo(6, 2);
+    g.closePath(); g.fill();
+    g.beginPath();                                     // tailplane
+    g.moveTo(-24, -2); g.lineTo(-33, -11); g.lineTo(-36, -11); g.lineTo(-31, -2);
+    g.closePath(); g.fill();
+    // a thin lit edge so the silhouette still reads against a night sky
+    g.strokeStyle = "rgba(220,230,215,.45)"; g.lineWidth = 1;
+    g.beginPath();
+    g.moveTo(30, 0); g.lineTo(8, -5); g.lineTo(-26, -4); g.lineTo(-32, 0);
+    g.stroke();
+    g.fillStyle = "rgba(255,170,90,.8)";               // exhaust
+    g.beginPath(); g.ellipse(-34, 0, 5 + Math.sin(game.time / 40) * 2, 2.4, 0, 0, TAU); g.fill();
+    g.restore();
+  }
+  // bombs in the air, one per marker still counting down
+  g.save();
+  g.fillStyle = "#2a2f26";
+  for (const m of airStrike.marks) {
+    if (m.done) continue;
+    const left = m.at - airStrike.elapsed;
+    if (left > c.warning * 0.8 || left < 0) continue;
+    const f = 1 - left / (c.warning * 0.8);            // 0 released -> 1 impact
+    const by = lerp((pl ? pl.y : 60), m.y, f * f);
+    g.save(); g.translate(m.x, by); g.rotate(Math.PI * 0.5 * f);
+    g.beginPath(); g.ellipse(0, 0, 2.6, 6, 0, 0, TAU); g.fill();
+    g.restore();
+  }
+  g.restore();
+}
+
 class Particle {
   constructor(x, y, vx, vy, r, color, life) {
     this.x = x; this.y = y; this.vx = vx; this.vy = vy;
@@ -3595,6 +3956,13 @@ class Pickup {
         g.beginPath();
         g.moveTo(0, -7); g.lineTo(6, -4); g.lineTo(6, 2); g.lineTo(0, 7); g.lineTo(-6, 2); g.lineTo(-6, -4);
         g.closePath(); g.fill();
+      } else if (this.kind === "airstrike") {
+        g.beginPath();
+        g.moveTo(8, 0); g.lineTo(-1, -3); g.lineTo(-8, -2); g.lineTo(-9, 0);
+        g.lineTo(-8, 2); g.lineTo(-1, 3); g.closePath(); g.fill();
+        g.beginPath();
+        g.moveTo(-2, -2); g.lineTo(-6, -8); g.lineTo(-8, -8); g.lineTo(-4, -2);
+        g.lineTo(-4, 2); g.lineTo(-8, 8); g.lineTo(-6, 8); g.lineTo(-2, 2); g.closePath(); g.fill();
       } else {
         g.beginPath(); g.arc(0, 0, 3, 0, TAU); g.fill();
         g.lineWidth = 1.6; g.strokeStyle = it.color;
@@ -3667,6 +4035,7 @@ const game = {
     bullets = []; zombies = []; particles = []; pickups = []; floats = []; decals = []; spits = [];
     grenades = []; shockwaves = [];
     projectiles = []; flames = []; arcs = [];
+    resetAirStrike();
     player.reset();
     this.score = 0; this.kills = 0; this.wave = 0;
     this.shotsFired = 0; this.shotsHit = 0; this.headshots = 0; this.maxCombo = 0;
@@ -3762,6 +4131,14 @@ const game = {
     for (const u of WEAPON_UNLOCKS) {
       if (here >= rank(u.world, u.stage) && Progress.unlockWeapon(u.id)) fresh.push(u.id);
     }
+    // abilities ride the same schedule; a newly unlocked one arrives with a
+    // charge so it is usable the moment its card appears
+    for (const u of ABILITY_UNLOCKS) {
+      if (here >= rank(u.world, u.stage) && Progress.unlockAbility(u.id)) {
+        player.items[u.id] = Math.max(player.items[u.id] || 0, 1);
+        this.newWeapon = ITEMS[u.id].name; this.newWeaponTime = 3000;
+      }
+    }
     this.equipUnlocked();
     if (fresh.length) {
       const w = WEAPONS[WEAPON_INDEX[fresh[fresh.length - 1]]];
@@ -3838,6 +4215,8 @@ const game = {
     player.items.grenade = Math.min(ITEMS.grenade.max, player.items.grenade + 1);
     if (this.wave % 3 === 0) player.items.shield = Math.min(ITEMS.shield.max, player.items.shield + 1);
     if (this.wave % 4 === 0) player.items.blast = Math.min(ITEMS.blast.max, player.items.blast + 1);
+    if (this.wave % 6 === 0 && hasAirStrike())
+      player.items.airstrike = Math.min(ITEMS.airstrike.max, player.items.airstrike + 1);
     for (let i = 1; i < 3; i++) {
       if (player.unlocked[i]) player.reserve[i] = Math.min(wstat(i).reserveMax, player.reserve[i] + (i === 1 ? 10 : 50));
     }
@@ -4527,6 +4906,7 @@ function update(dt) {
   }
   for (const a of arcs) { a.life -= 16.6 * dt; if (a.life <= 0) a.dead = true; }
   for (const w of shockwaves) w.update(dt);
+  updateAirStrike(dt);
   for (const s of spits) {
     s.x += s.vx * dt; s.y += s.vy * dt; s.life -= 16.6 * dt;
     if (s.life <= 0 || s.x < 0 || s.x > W || s.y < 0 || s.y > H) s.dead = true;
@@ -4832,7 +5212,10 @@ function drawHUD(g) {
   {
     const big = TOUCH_UI;
     const iw = big ? 74 : 62, ih = big ? 56 : 46, ig = 8;
+    // air strike joins the row once the campaign has unlocked it, the same
+    // rule the weapon slots already use for locked guns
     const kinds = ["grenade", "shield", "blast"];
+    if (hasAirStrike()) kinds.push("airstrike");
     const totalW = kinds.length * iw + (kinds.length - 1) * ig;
     const ix0 = W - totalW - 16, iy = H - ih - 14;
     kinds.forEach((kind, i) => {
@@ -4872,6 +5255,16 @@ function drawHUD(g) {
         g.moveTo(cx, cy - 8); g.lineTo(cx + 7, cy - 4); g.lineTo(cx + 7, cy + 3);
         g.lineTo(cx, cy + 9); g.lineTo(cx - 7, cy + 3); g.lineTo(cx - 7, cy - 4);
         g.closePath(); g.fill();
+      } else if (kind === "airstrike") {
+        // swept-wing silhouette plus a falling bomb, matching the aircraft
+        g.beginPath();
+        g.moveTo(cx + 9, cy - 1); g.lineTo(cx - 1, cy - 4); g.lineTo(cx - 9, cy - 3);
+        g.lineTo(cx - 11, cy - 1); g.lineTo(cx - 9, cy + 1); g.lineTo(cx - 1, cy + 2);
+        g.lineTo(cx + 9, cy + 1); g.closePath(); g.fill();
+        g.beginPath();
+        g.moveTo(cx - 2, cy - 2); g.lineTo(cx - 7, cy - 10); g.lineTo(cx - 9, cy - 10);
+        g.lineTo(cx - 5, cy - 2); g.lineTo(cx - 5, cy + 1); g.lineTo(cx - 9, cy + 9);
+        g.lineTo(cx - 7, cy + 9); g.lineTo(cx - 2, cy + 1); g.closePath(); g.fill();
       } else {
         g.beginPath(); g.arc(cx, cy, 3.2, 0, TAU); g.fill();
         g.beginPath(); g.arc(cx, cy, 8, 0, TAU); g.stroke();
@@ -4893,6 +5286,35 @@ function drawHUD(g) {
       g.font = "bold 13px 'Courier New', monospace"; g.textAlign = "center";
       g.fillText(left.toFixed(1) + "s", bx + iw / 2, iy - 7);
     }
+  }
+
+  // air strike targeting: banner, instructions and an always-present CANCEL
+  if (airStrikeTargeting()) {
+    const bw2 = 224, bh2 = 44, bx2 = W / 2 - bw2 / 2, by2 = 10;
+    g.fillStyle = "rgba(0,0,0,.72)"; g.fillRect(bx2, by2, bw2, bh2);
+    g.strokeStyle = ITEMS.airstrike.color; g.lineWidth = 2;
+    g.strokeRect(bx2 + .5, by2 + .5, bw2 - 1, bh2 - 1);
+    g.textAlign = "center";
+    g.fillStyle = ITEMS.airstrike.color;
+    g.font = "bold 15px 'Courier New', monospace";
+    g.fillText("AIR STRIKE", W / 2, by2 + 19);
+    g.fillStyle = "#cfd6c9";
+    g.font = "bold 11px 'Courier New', monospace";
+    g.fillText(TOUCH_UI ? "TAP TO PLACE \u00b7 TAP AGAIN TO CONFIRM"
+                        : "CLICK TO CONFIRM \u00b7 ESC TO CANCEL", W / 2, by2 + 35);
+
+    // sized from the display scale on touch, so CANCEL stays a real tap
+    // target on a phone where world px shrink
+    const ch2 = TOUCH_UI ? Math.max(40, 46 / scale) : 30;
+    const cw2 = TOUCH_UI ? Math.max(110, ch2 * 2.6) : 92;
+    const cx2 = W / 2 - cw2 / 2, cy2 = by2 + bh2 + 6;
+    uiButtons.push({ x: cx2, y: cy2, w: cw2, h: ch2, id: "asCancel" });
+    g.fillStyle = "rgba(0,0,0,.62)"; g.fillRect(cx2, cy2, cw2, ch2);
+    g.strokeStyle = "#b3121b"; g.lineWidth = 1.6;
+    g.strokeRect(cx2 + .5, cy2 + .5, cw2 - 1, ch2 - 1);
+    g.fillStyle = "#e6c0c0";
+    g.font = "bold 13px 'Courier New', monospace";
+    g.fillText("CANCEL", W / 2, cy2 + ch2 * 0.66);
   }
 
   // active power-ups: only shown while running
@@ -5219,6 +5641,7 @@ function render() {
     }
     ctx.restore();
   }
+  drawAirStrike(ctx);
   for (const f of floats) f.draw(ctx);
 
   // off-screen zombie indicators
