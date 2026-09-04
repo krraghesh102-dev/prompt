@@ -64,6 +64,64 @@
   #touchNote { display: none; font-size: 12px; color: #7f8a79; margin-top: 16px; }
   @media (hover: none) { #touchNote { display: block; } }
 
+  /* ---- campaign menus ---- */
+  .wide { max-width: 900px; width: 100%; }
+  .menuBtns { display: flex; flex-direction: column; gap: 12px; align-items: center; }
+  .menuBtns button { min-width: 240px; }
+  button.ghost { border-color: #55603f; color: #9aa694; }
+  button.ghost:hover { background: #55603f; color: #0b0d0a; }
+  .backRow { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin-top: 18px; }
+  .backRow button { min-width: 150px; padding: 12px 20px; font-size: 14px; }
+
+  .grid {
+    display: grid; gap: 12px; width: 100%;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  }
+  .card {
+    background: rgba(12,16,10,.85);
+    border: 2px solid #34402a;
+    padding: 14px 16px; text-align: left;
+    display: flex; flex-direction: column; gap: 6px;
+    transition: border-color .15s, transform .1s, background .15s;
+    cursor: pointer; position: relative;
+  }
+  .card.locked { cursor: not-allowed; opacity: .55; border-color: #2a2f26; }
+  .card:not(.locked):hover, .card:not(.locked):active { border-color: var(--toxic); background: rgba(24,34,18,.9); transform: translateY(-2px); }
+  .card.done { border-color: #6f8f3f; }
+  .card .num { font-size: 11px; letter-spacing: 3px; color: #8a9678; }
+  .card .nm { font-size: 19px; letter-spacing: 2px; color: var(--toxic); }
+  .card.locked .nm { color: #6d7566; }
+  .card .ds { font-size: 11px; color: #93a08b; letter-spacing: 1px; line-height: 1.5; }
+  .card .st { font-size: 15px; letter-spacing: 3px; color: #ffd76a; }
+  .card .meta { font-size: 11px; color: #7f8a79; letter-spacing: 1px; }
+  .card .lockTag { font-size: 12px; color: #b3121b; letter-spacing: 2px; }
+
+  .stageRow {
+    display: flex; align-items: center; gap: 14px;
+    background: rgba(12,16,10,.85); border: 2px solid #34402a;
+    padding: 13px 16px; cursor: pointer; text-align: left; min-height: 48px;
+    transition: border-color .15s, background .15s, transform .1s;
+  }
+  .stageRow:not(.locked):hover, .stageRow:not(.locked):active { border-color: var(--toxic); background: rgba(24,34,18,.9); transform: translateX(3px); }
+  .stageRow.locked { cursor: not-allowed; opacity: .5; border-color: #2a2f26; }
+  .stageRow.current { border-color: var(--toxic); box-shadow: 0 0 0 1px rgba(125,213,63,.25) inset; }
+  .stageRow .sn { font-size: 17px; color: #8a9678; min-width: 32px; letter-spacing: 1px; }
+  .stageRow .snm { flex: 1; font-size: 15px; letter-spacing: 2px; color: #dfe8d6; }
+  .stageRow.locked .snm { color: #6d7566; }
+  .stageRow .ss { font-size: 15px; letter-spacing: 2px; color: #ffd76a; min-width: 58px; text-align: right; }
+  .stageRow .boss { font-size: 10px; color: #ff6b6b; letter-spacing: 2px; }
+  .stack { display: flex; flex-direction: column; gap: 9px; width: 100%; }
+
+  .results { display: grid; grid-template-columns: 1fr auto; gap: 5px 18px; font-size: 13px;
+             letter-spacing: 1px; margin: 0 auto 18px; max-width: 340px; text-align: left; }
+  .results .k { color: #93a08b; }
+  .results .v { color: #fff; text-align: right; font-variant-numeric: tabular-nums; }
+  .bigStars { font-size: 40px; letter-spacing: 8px; color: #ffd76a; margin: 6px 0 14px;
+              animation: pop .45s ease-out both; }
+  @keyframes pop { from { transform: scale(.4); opacity: 0 } to { transform: scale(1); opacity: 1 } }
+  .unlockNote { color: var(--toxic); letter-spacing: 2px; font-size: 13px; margin-bottom: 14px; }
+  @media (prefers-reduced-motion: reduce) { .bigStars { animation: none } .card, .stageRow { transition: none } }
+
   /* short landscape phones: keep the whole panel, START included, on screen */
   @media (max-height: 480px) {
     h1 { font-size: 30px; letter-spacing: 3px; }
@@ -73,6 +131,13 @@
     .stat { font-size: 12px; line-height: 1.6; margin-bottom: 10px; }
     button { padding: 9px 26px; font-size: 14px; }
     #touchNote { margin-top: 8px; font-size: 11px; }
+    .card { padding: 10px 12px; gap: 4px; }
+    .card .nm { font-size: 16px; }
+    .stageRow { padding: 10px 12px; min-height: 46px; }
+    .grid { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 9px; }
+    .bigStars { font-size: 30px; margin: 4px 0 10px; }
+    .results { font-size: 12px; margin-bottom: 12px; }
+    .menuBtns button { min-width: 200px; }
   }
 </style>
 </head>
@@ -83,6 +148,19 @@
   <div class="panel">
     <h1>DEAD ZONE</h1>
     <div class="sub">SURVIVE THE WAVES · CLEAR THE HORDE</div>
+    <div class="menuBtns">
+      <button id="campaignBtn">CAMPAIGN</button>
+      <button id="endlessBtn">ENDLESS</button>
+      <button class="ghost" id="settingsBtn">SETTINGS</button>
+      <button class="ghost" id="howBtn">CONTROLS</button>
+    </div>
+    <div id="touchNote">Rotate to landscape to play.</div>
+  </div>
+</div>
+
+<div id="how" class="overlay hidden">
+  <div class="panel">
+    <h2>CONTROLS</h2>
     <div class="keys">
       <div><b>WASD / Arrows</b> — move</div>
       <div><b>Mouse</b> — aim &nbsp;·&nbsp; <b>Click / Hold</b> — shoot</div>
@@ -95,8 +173,65 @@
       <div><b>On-screen buttons</b> — weapons, reload, pause</div>
       <div><b>Bottom-right</b> — grenade, shield, power blast</div>
     </div>
-    <button id="startBtn">START</button>
-    <div id="touchNote">Rotate to landscape for a better view.</div>
+    <button class="ghost" id="howBack">BACK</button>
+  </div>
+</div>
+
+<div id="worlds" class="overlay hidden">
+  <div class="panel wide">
+    <h2>SELECT WORLD</h2>
+    <div class="sub" id="worldsSub">CAMPAIGN</div>
+    <div class="grid" id="worldGrid"></div>
+    <div class="backRow"><button class="ghost" id="worldsBack">MAIN MENU</button></div>
+  </div>
+</div>
+
+<div id="stages" class="overlay hidden">
+  <div class="panel wide">
+    <h2 id="stagesTitle">WORLD 01</h2>
+    <div class="sub" id="stagesSub">THE OUTBREAK</div>
+    <div class="stack" id="stageList"></div>
+    <div class="backRow"><button class="ghost" id="stagesBack">WORLD SELECT</button></div>
+  </div>
+</div>
+
+<div id="stagedone" class="overlay hidden">
+  <div class="panel">
+    <h2 id="sdTitle">STAGE COMPLETE</h2>
+    <div class="sub" id="sdName"></div>
+    <div class="bigStars" id="sdStars"></div>
+    <div class="unlockNote" id="sdUnlock"></div>
+    <div class="results" id="sdStats"></div>
+    <div class="menuBtns">
+      <button id="sdNext">NEXT STAGE</button>
+      <div class="backRow">
+        <button class="ghost" id="sdReplay">REPLAY</button>
+        <button class="ghost" id="sdSelect">STAGE SELECT</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="worlddone" class="overlay hidden">
+  <div class="panel">
+    <h1 id="wdTitle">WORLD 01 COMPLETE</h1>
+    <div class="sub" id="wdLine"></div>
+    <div class="bigStars" id="wdStars"></div>
+    <div class="unlockNote" id="wdUnlock"></div>
+    <div class="menuBtns"><button id="wdNext">CONTINUE</button></div>
+  </div>
+</div>
+
+<div id="settings" class="overlay hidden">
+  <div class="panel">
+    <h2>SETTINGS</h2>
+    <div class="sub">DEAD ZONE</div>
+    <div class="menuBtns">
+      <button id="setSound">SOUND: ON</button>
+      <button class="ghost" id="setReset">RESET CAMPAIGN PROGRESS</button>
+      <button class="ghost" id="setBack">BACK</button>
+    </div>
+    <div class="sub" id="setInfo" style="margin-top:16px"></div>
   </div>
 </div>
 
@@ -104,7 +239,10 @@
   <div class="panel">
     <h2>YOU DIED</h2>
     <div class="stat" id="goStats"></div>
-    <button id="retryBtn">TRY AGAIN</button>
+    <div class="menuBtns">
+      <button id="retryBtn">TRY AGAIN</button>
+      <button class="ghost" id="goSelect">STAGE SELECT</button>
+    </div>
   </div>
 </div>
 
@@ -120,7 +258,10 @@
   <div class="panel">
     <h2>PAUSED</h2>
     <div class="sub">press P or ESC to resume</div>
-    <button id="resumeBtn">RESUME</button>
+    <div class="menuBtns">
+      <button id="resumeBtn">RESUME</button>
+      <button class="ghost" id="pauseQuit">QUIT STAGE</button>
+    </div>
   </div>
 </div>
 
@@ -160,7 +301,8 @@ function resize() {
 function checkOrientation() {
   const portrait = window.innerHeight > window.innerWidth;
   const isTouch = matchMedia("(hover: none)").matches || TOUCH_UI;
-  const show = portrait && isTouch;
+  const inGame = game.state === "play" || game.state === "paused";
+  const show = portrait && isTouch && inGame;
   document.getElementById("rotate").classList.toggle("hidden", !show);
   const pausedEl = document.getElementById("paused");
   if (show) {
@@ -307,6 +449,7 @@ canvas.addEventListener("touchcancel", handleTouchEnd, { passive: false });
 /* ---------------- audio (tiny synth, no assets) ---------------- */
 let actx = null;
 function audio() {
+  if (typeof soundOn !== "undefined" && !soundOn) return null;
   if (!actx) { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { return null; } }
   if (actx.state === "suspended") actx.resume();
   return actx;
@@ -365,6 +508,220 @@ const ITEMS = {
              radius: 210, dmg: 260, knock: 26, cooldown: 900 }
 };
 
+
+/* ================= CAMPAIGN DATA =================
+   Data-driven so new worlds/stages/bosses are additions here, never
+   changes to the progression engine below. */
+const EVENTS = {
+  BLOOD_RUSH:     { name: "BLOOD RUSH",     tag: "SURVIVE THE HORDE",
+                    countMul: 2.3, hpMul: 0.5,  speedMul: 1.05, types: ["walker", "runner"] },
+  ZOMBIE_FRENZY:  { name: "ZOMBIE FRENZY",  tag: "THEY ARE FAST NOW",
+                    countMul: 1.1, hpMul: 0.85, speedMul: 1.75 },
+  BRUTE_INVASION: { name: "BRUTE INVASION", tag: "HEAVY UNITS INBOUND",
+                    countMul: 0.45, hpMul: 1.1, speedMul: 1, types: ["brute"] },
+  BLACKOUT:       { name: "BLACKOUT",       tag: "THE LIGHTS ARE OUT",
+                    countMul: 1.15, hpMul: 1, speedMul: 1.1, dark: true },
+  INFECTION:      { name: "INFECTION",      tag: "TOXIC SPRAY INCOMING",
+                    countMul: 0.9, hpMul: 1, speedMul: 1, types: ["spitter", "walker"] }
+};
+
+/* Each world: a theme (canvas-only, no assets), a difficulty multiplier and
+   five stages. Stage 5 is always the boss. `pool` is ordered by the order
+   enemies are introduced across that stage's waves. */
+const WORLDS = [
+  { id: 1, name: "THE OUTBREAK", desc: "THE INFECTION HAS BEGUN.", diff: 1.00,
+    theme: { ground: "#171c14", grid: "rgba(255,255,255,.028)", edge: "rgba(125,213,63,.16)", tint: null },
+    boss: { name: "THE BUTCHER", hp: 950, scale: 1.00 },
+    stages: [
+      { name: "FIRST BLOOD", waves: 5,  pool: ["walker", "runner"],          events: { 5: "BLOOD_RUSH" } },
+      { name: "THE HORDE",   waves: 5,  pool: ["walker", "runner"],          events: { 5: "BLOOD_RUSH" } },
+      { name: "RUN!",        waves: 5,  pool: ["runner", "walker"],          events: { 5: "ZOMBIE_FRENZY" } },
+      { name: "NO ESCAPE",   waves: 5,  pool: ["walker", "runner", "brute"], events: { 5: "BRUTE_INVASION" } },
+      { name: "THE BUTCHER", waves: 10, pool: ["walker", "runner", "brute"], boss: true,
+        events: { 5: "BLOOD_RUSH" } }
+    ] },
+  { id: 2, name: "DEAD CITY", desc: "THE STREETS BELONG TO THEM.", diff: 1.25,
+    theme: { ground: "#141518", grid: "rgba(255,255,255,.035)", edge: "rgba(140,160,190,.20)", tint: "rgba(60,70,90,.10)" },
+    boss: { name: "THE COLOSSUS", hp: 1250, scale: 1.06 },
+    stages: [
+      { name: "COLD STREETS",  waves: 5,  pool: ["walker", "runner"],                     events: { 5: "ZOMBIE_FRENZY" } },
+      { name: "ROOFTOP RUN",   waves: 5,  pool: ["runner", "walker", "brute"],            events: { 5: "BLOOD_RUSH" } },
+      { name: "SUBWAY",        waves: 5,  pool: ["walker", "brute", "runner"],            events: { 5: "BRUTE_INVASION" } },
+      { name: "TOXIC ALLEY",   waves: 5,  pool: ["walker", "runner", "spitter"],          events: { 5: "INFECTION" } },
+      { name: "THE COLOSSUS",  waves: 10, pool: ["walker", "runner", "brute", "spitter"], boss: true,
+        events: { 5: "BRUTE_INVASION" } }
+    ] },
+  { id: 3, name: "NIGHTFALL", desc: "YOU CANNOT SEE THEM COMING.", diff: 1.50,
+    theme: { ground: "#0c0f12", grid: "rgba(255,255,255,.022)", edge: "rgba(90,140,200,.20)", tint: "rgba(10,20,45,.28)", dark: true },
+    boss: { name: "THE REAPER", hp: 1500, scale: 1.10 },
+    stages: [
+      { name: "LAST LIGHT",   waves: 5,  pool: ["walker", "runner"],                     events: { 5: "BLACKOUT" } },
+      { name: "BLIND SPOT",   waves: 5,  pool: ["runner", "spitter"],                    events: { 5: "BLACKOUT" } },
+      { name: "COLD SWEAT",   waves: 5,  pool: ["walker", "brute", "runner"],            events: { 5: "ZOMBIE_FRENZY" } },
+      { name: "NO DAWN",      waves: 5,  pool: ["runner", "spitter", "brute"],           events: { 5: "INFECTION" } },
+      { name: "THE REAPER",   waves: 10, pool: ["walker", "runner", "brute", "spitter"], boss: true,
+        events: { 5: "BLACKOUT" } }
+    ] },
+  { id: 4, name: "INFECTED FACTORY", desc: "SOMETHING IS BEING MADE HERE.", diff: 1.80,
+    theme: { ground: "#1a1712", grid: "rgba(255,180,80,.045)", edge: "rgba(255,150,60,.22)", tint: "rgba(80,45,10,.14)" },
+    boss: { name: "THE FOREMAN", hp: 1850, scale: 1.14 },
+    stages: [
+      { name: "LOADING BAY",  waves: 5,  pool: ["walker", "brute"],                      events: { 5: "BRUTE_INVASION" } },
+      { name: "THE LINE",     waves: 5,  pool: ["runner", "brute"],                      events: { 5: "ZOMBIE_FRENZY" } },
+      { name: "VAT ROOM",     waves: 5,  pool: ["spitter", "walker", "brute"],           events: { 5: "INFECTION" } },
+      { name: "MELTDOWN",     waves: 5,  pool: ["runner", "brute", "spitter"],           events: { 5: "BLOOD_RUSH" } },
+      { name: "THE FOREMAN",  waves: 10, pool: ["walker", "runner", "brute", "spitter"], boss: true,
+        events: { 5: "BRUTE_INVASION" } }
+    ] },
+  { id: 5, name: "THE QUARANTINE", desc: "THE CURE WAS NEVER COMING.", diff: 2.10,
+    theme: { ground: "#12181a", grid: "rgba(180,255,240,.035)", edge: "rgba(120,220,220,.22)", tint: "rgba(20,60,60,.12)" },
+    boss: { name: "PATIENT ZERO", hp: 2200, scale: 1.18 },
+    stages: [
+      { name: "TRIAGE",       waves: 5,  pool: ["walker", "spitter"],                    events: { 5: "INFECTION" } },
+      { name: "WARD 9",       waves: 5,  pool: ["runner", "spitter"],                    events: { 5: "BLACKOUT" } },
+      { name: "COLD STORAGE", waves: 5,  pool: ["brute", "walker", "spitter"],           events: { 5: "BRUTE_INVASION" } },
+      { name: "LOCKDOWN",     waves: 5,  pool: ["runner", "brute", "spitter"],           events: { 5: "ZOMBIE_FRENZY" } },
+      { name: "PATIENT ZERO", waves: 10, pool: ["walker", "runner", "brute", "spitter"], boss: true,
+        events: { 5: "INFECTION" } }
+    ] },
+  { id: 6, name: "THE WASTELANDS", desc: "NOTHING LEFT TO CONTAIN.", diff: 2.50,
+    theme: { ground: "#191510", grid: "rgba(255,220,150,.035)", edge: "rgba(200,120,60,.24)", tint: "rgba(70,45,20,.16)" },
+    boss: { name: "THE WARLORD", hp: 2600, scale: 1.22 },
+    stages: [
+      { name: "OPEN GROUND",  waves: 5,  pool: ["runner", "walker", "brute"],            events: { 5: "BLOOD_RUSH" } },
+      { name: "DUST STORM",   waves: 5,  pool: ["walker", "spitter", "brute"],           events: { 5: "BLACKOUT" } },
+      { name: "THE PIT",      waves: 5,  pool: ["brute", "runner"],                      events: { 5: "BRUTE_INVASION" } },
+      { name: "LAST STAND",   waves: 5,  pool: ["runner", "brute", "spitter"],           events: { 5: "ZOMBIE_FRENZY" } },
+      { name: "THE WARLORD",  waves: 10, pool: ["walker", "runner", "brute", "spitter"], boss: true,
+        events: { 5: "INFECTION" } }
+    ] }
+];
+
+/* ================= SAVE DATA =================
+   Namespaced away from "deadzone_best" so the endless high score is
+   untouched by anything the campaign does. */
+const SAVE_KEY = "deadzone_campaign_v1";
+
+const Progress = {
+  data: null,
+  blank() {
+    const worlds = {};
+    for (const w of WORLDS) {
+      const stages = {};
+      w.stages.forEach((st, i) => {
+        stages[i + 1] = { unlocked: w.id === 1 && i === 0, completed: false, stars: 0, best: 0 };
+      });
+      worlds[w.id] = { unlocked: w.id === 1, completed: false, stages };
+    }
+    return { version: 1, worlds, highestWave: 0 };
+  },
+  load() {
+    try {
+      const raw = localStorage.getItem(SAVE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && parsed.worlds) { this.data = this.migrate(parsed); return this.data; }
+      }
+    } catch (e) { /* corrupt or unavailable storage falls through to a fresh save */ }
+    this.data = this.blank();
+    return this.data;
+  },
+  /* Adding a world or stage later must not wipe an existing save, so merge
+     the blank shape under whatever is already stored. */
+  migrate(saved) {
+    const base = this.blank();
+    for (const wid in base.worlds) {
+      const sw = saved.worlds && saved.worlds[wid];
+      if (!sw) continue;
+      const bw = base.worlds[wid];
+      bw.unlocked = !!sw.unlocked || bw.unlocked;
+      bw.completed = !!sw.completed;
+      for (const sid in bw.stages) {
+        const ss = sw.stages && sw.stages[sid];
+        if (!ss) continue;
+        const bs = bw.stages[sid];
+        bs.unlocked = !!ss.unlocked || bs.unlocked;
+        bs.completed = !!ss.completed;
+        bs.stars = Math.max(0, Math.min(3, ss.stars | 0));
+        bs.best = Math.max(0, ss.best | 0);
+      }
+    }
+    base.highestWave = Math.max(0, saved.highestWave | 0);
+    return base;
+  },
+  save() {
+    try { localStorage.setItem(SAVE_KEY, JSON.stringify(this.data)); }
+    catch (e) { /* private mode: progress just will not persist */ }
+  },
+  world(id) { return this.data.worlds[id]; },
+  stage(wid, sid) { return this.data.worlds[wid].stages[sid]; },
+  worldStars(wid) {
+    const w = this.data.worlds[wid];
+    return Object.values(w.stages).reduce((a, s) => a + s.stars, 0);
+  },
+  totalStars() { return WORLDS.reduce((a, w) => a + this.worldStars(w.id), 0); },
+  reset() { this.data = this.blank(); this.save(); }
+};
+Progress.load();
+
+/* Stage results never move backwards: stars and best score only improve. */
+function recordStageResult(wid, sid, stars, score) {
+  const st = Progress.stage(wid, sid);
+  const firstClear = !st.completed;
+  st.completed = true;
+  st.stars = Math.max(st.stars, stars);
+  st.best = Math.max(st.best, score);
+
+  const world = WORLDS.find(w => w.id === wid);
+  let unlockedStage = null, unlockedWorld = null;
+
+  if (sid < world.stages.length) {
+    const next = Progress.stage(wid, sid + 1);
+    if (!next.unlocked) { next.unlocked = true; unlockedStage = sid + 1; }
+  } else {
+    // boss stage cleared: the world is done and the next one opens
+    Progress.world(wid).completed = true;
+    const nextWorld = WORLDS.find(w => w.id === wid + 1);
+    if (nextWorld && !Progress.world(nextWorld.id).unlocked) {
+      Progress.world(nextWorld.id).unlocked = true;
+      unlockedWorld = nextWorld;
+    }
+  }
+  Progress.save();
+  return { firstClear, unlockedStage, unlockedWorld };
+}
+
+/* Build one stage's wave plan. Enemies from `pool` are introduced one at a
+   time across the stage, and the wave that introduces a type is weighted
+   towards it so the player meets each threat on its own first. */
+function buildWavePlan(world, stageIdx) {
+  const st = world.stages[stageIdx];
+  const plan = [];
+  let prevLive = 0;
+  for (let i = 1; i <= st.waves; i++) {
+    const isBossWave = !!st.boss && i === st.waves;
+    const eventKey = st.events && st.events[i];
+    const live = Math.max(1, Math.min(st.pool.length, Math.ceil((i / st.waves) * st.pool.length)));
+    const justIntroduced = live > prevLive ? st.pool[live - 1] : null;
+    prevLive = live;
+
+    const bag = [];
+    for (let t = 0; t < live; t++) {
+      const type = st.pool[t];
+      const weight = type === justIntroduced ? 4 : 1;
+      for (let k = 0; k < weight; k++) bag.push(type);
+    }
+    plan.push({
+      index: i,
+      boss: isBossWave,
+      event: isBossWave ? null : (eventKey || null),
+      bag,
+      count: isBossWave ? 4 : Math.round((5 + i * 2.2) * (1 + stageIdx * 0.16) * world.diff)
+    });
+  }
+  return plan;
+}
+
 /* ---------------- weapons ---------------- */
 const WEAPONS = [
   { name: "PISTOL",  short: "PSTL", dmg: 26, rof: 210, mag: 12, reload: 900,  spread: 0.035, speed: 14, pellets: 1, auto: false,
@@ -421,6 +778,7 @@ class Player {
     this.lastShot = game.time;
     this.ammo[this.wi]--;
     const base = this.angle;
+    game.shotsFired += w.pellets;
     for (let i = 0; i < w.pellets; i++) {
       const a = base + rand(-w.spread, w.spread);
       const muzzle = this.r + 10;
@@ -620,6 +978,7 @@ const ZTYPES = {
   walker: { hp: 42,  speed: 0.78, r: 13, dmg: 10, points: 10, color: "#6b8f3f", dark: "#3d5522", touch: 620 },
   runner: { hp: 30,  speed: 1.75, r: 11, dmg: 8,  points: 18, color: "#a8c94a", dark: "#54701f", touch: 480 },
   brute:  { hp: 190, speed: 0.55, r: 21, dmg: 22, points: 45, color: "#4d6b4a", dark: "#26361f", touch: 800 },
+  boss:   { hp: 950, speed: 0.62, r: 34, dmg: 30, points: 900, color: "#8c3b3b", dark: "#4a1c1c", touch: 700 },
   spitter:{ hp: 55,  speed: 0.9,  r: 13, dmg: 12, points: 30, color: "#9b6bd6", dark: "#4b2f6b", touch: 700, ranged: true }
 };
 
@@ -659,6 +1018,7 @@ class Zombie {
     game.kills++;
     game.combo++;
     game.comboTimer = 2200;
+    if (game.combo > game.maxCombo) game.maxCombo = game.combo;
     const mult = 1 + Math.min(1.5, Math.floor(game.combo / 5) * 0.25);
     const pts = Math.round(this.t.points * mult);
     game.addScore(pts, this.x, this.y, mult > 1);
@@ -767,6 +1127,119 @@ class Zombie {
       g.fillStyle = "rgba(0,0,0,.6)"; g.fillRect(x, y, w, h);
       g.fillStyle = "#c0392b"; g.fillRect(x, y, w * (this.hp / this.maxHp), h);
     }
+  }
+}
+
+class Boss extends Zombie {
+  constructor(cfg, x, y, diff) {
+    super("boss", x, y, 1);
+    this.name = cfg.name;
+    this.maxHp = Math.round(cfg.hp * diff);
+    this.hp = this.maxHp;
+    this.r = Math.round(34 * cfg.scale);
+    this.mass = this.r / 13;
+    this.baseSpeed = 0.62 * cfg.scale;
+    this.speed = this.baseSpeed;
+    this.isBoss = true;
+    this.enraged = false;
+    this.nextCharge = game.time + 3200;
+    this.charging = 0;        // >0 while winding up or mid-charge
+    this.windup = 0;
+    this.nextSummon = game.time + 6000;
+    this.t = Object.assign({}, ZTYPES.boss, { points: Math.round(900 * cfg.scale) });
+  }
+  update(dt) {
+    const dx = player.x - this.x, dy = player.y - this.y;
+    const d = Math.hypot(dx, dy) || 1;
+
+    // rage at 30% health: faster and more aggressive, announced once
+    if (!this.enraged && this.hp <= this.maxHp * 0.3) {
+      this.enraged = true;
+      this.speed = this.baseSpeed * 1.75;
+      this.nextCharge = game.time + 900;
+      game.banner = this.name + " IS ENRAGED!"; game.bannerTime = 2200;
+      game.shake = Math.min(24, game.shake + 14);
+      SFX.blast();
+    }
+
+    // wind up, then lunge along the locked-in heading -- telegraphed so it
+    // can be dodged rather than being an unavoidable hit
+    if (this.windup > 0) {
+      this.windup -= 16.6 * dt;
+      this.angle = Math.atan2(dy, dx);
+      if (this.windup <= 0) {
+        this.charging = this.enraged ? 620 : 480;
+        this.chx = Math.cos(this.angle); this.chy = Math.sin(this.angle);
+        SFX.boom();
+      }
+      this.vx *= 0.7; this.vy *= 0.7;
+    } else if (this.charging > 0) {
+      this.charging -= 16.6 * dt;
+      const cs = (this.enraged ? 7.4 : 5.8);
+      this.x += this.chx * cs * dt; this.y += this.chy * cs * dt;
+      this.x = clamp(this.x, this.r, W - this.r); this.y = clamp(this.y, this.r, H - this.r);
+      if (Math.random() < 0.7) {
+        particles.push(new Particle(this.x, this.y, rand(-1, 1), rand(-1, 1), rand(2, 4), "#7a2b2b", 380));
+      }
+      if (d < this.r + player.r + 6) player.damage(this.t.dmg);
+    } else {
+      super.update(dt);
+      if (game.time > this.nextCharge) {
+        this.nextCharge = game.time + (this.enraged ? 2600 : 4200) + rand(0, 900);
+        this.windup = 520;
+      }
+    }
+
+    // summons keep the arena occupied without burying the player
+    if (game.time > this.nextSummon) {
+      this.nextSummon = game.time + (this.enraged ? 5200 : 8000);
+      const alive = zombies.filter(z => !z.dead && !z.isBoss).length;
+      if (alive < 14) {
+        const n = this.enraged ? 4 : 3;
+        for (let i = 0; i < n; i++) {
+          const a = rand(0, TAU), dd = this.r + rand(30, 70);
+          zombies.push(new Zombie(Math.random() < 0.5 ? "walker" : "runner",
+            clamp(this.x + Math.cos(a) * dd, 20, W - 20),
+            clamp(this.y + Math.sin(a) * dd, 20, H - 20), 1 + game.diff * 0.2));
+        }
+        game.banner = this.name + " CALLS THE HORDE"; game.bannerTime = 1200;
+      }
+    }
+  }
+  draw(g) {
+    const r = this.r;
+    g.fillStyle = "rgba(0,0,0,.42)";
+    g.beginPath(); g.ellipse(this.x, this.y + r * 0.8, r * 1.0, r * 0.42, 0, 0, TAU); g.fill();
+
+    g.save(); g.translate(this.x, this.y); g.rotate(this.angle);
+    const rage = this.enraged;
+    // winding up flares red so the charge reads before it lands
+    if (this.windup > 0) {
+      g.globalAlpha = 0.35 + Math.sin(game.time / 45) * 0.2;
+      g.fillStyle = "#ff3b3b";
+      g.beginPath(); g.arc(0, 0, r * 1.5, 0, TAU); g.fill();
+      g.globalAlpha = 1;
+    }
+    g.strokeStyle = rage ? "#8a1f1f" : "#4a1c1c"; g.lineWidth = r * 0.42; g.lineCap = "round";
+    g.beginPath();
+    g.moveTo(0, -r * 0.55); g.lineTo(r * 1.25, -r * 0.4);
+    g.moveTo(0, r * 0.55);  g.lineTo(r * 1.25, r * 0.4);
+    g.stroke();
+    g.fillStyle = this.flash > 0 ? "#ffffff" : (rage ? "#b33a3a" : "#8c3b3b");
+    g.beginPath(); g.arc(0, 0, r, 0, TAU); g.fill();
+    g.strokeStyle = rage ? "#ff6b6b" : "#3a1414"; g.lineWidth = 3; g.stroke();
+    // butcher's apron
+    g.fillStyle = "rgba(20,6,6,.45)";
+    g.beginPath(); g.arc(-r * 0.2, 0, r * 0.72, 0, TAU); g.fill();
+    g.fillStyle = this.flash > 0 ? "#fff" : "#3a1414";
+    g.beginPath(); g.arc(r * 0.45, 0, r * 0.5, 0, TAU); g.fill();
+    g.fillStyle = rage ? "#ffdd33" : "#ff4d4d";
+    g.beginPath(); g.arc(r * 0.7, -r * 0.2, r * 0.13, 0, TAU); g.fill();
+    g.beginPath(); g.arc(r * 0.7, r * 0.2, r * 0.13, 0, TAU); g.fill();
+    // cleaver
+    g.fillStyle = "#c8ccc4";
+    g.fillRect(r * 0.9, -r * 0.75, r * 0.75, r * 0.34);
+    g.restore();
   }
 }
 
@@ -988,9 +1461,15 @@ const player = new Player();
 
 /* ---------------- game / wave logic ---------------- */
 const game = {
-  state: "menu",           // menu | play | paused | over
+  state: "menu",           // menu | worlds | stages | play | paused | over | stagedone | worlddone
+  mode: "endless",         // endless | campaign
+  cw: 1, cs: 1,            // campaign world id / stage number (1-based)
+  plan: null, planIdx: 0,  // wave plan for the current stage
+  eventMod: null, dark: 0, diff: 1, theme: null,
+  boss: null, eventBanner: null, eventBannerTime: 0,
   time: 0,
   score: 0, kills: 0,
+  shotsFired: 0, shotsHit: 0, headshots: 0, maxCombo: 0,
   wave: 0, toSpawn: 0, spawnTimer: 0, spawnGap: 700,
   waveActive: false, breakTimer: 0,
   combo: 0, comboTimer: 0,
@@ -1003,12 +1482,17 @@ const game = {
     grenades = []; shockwaves = [];
     player.reset();
     this.score = 0; this.kills = 0; this.wave = 0;
+    this.shotsFired = 0; this.shotsHit = 0; this.headshots = 0; this.maxCombo = 0;
     this.toSpawn = 0; this.spawnTimer = 0;
     this.waveActive = false; this.breakTimer = 1800;
     this.combo = 0; this.comboTimer = 0;
     this.shake = 0; this.redFlash = 0; this.flash = 0;
     this.banner = "GET READY"; this.bannerTime = 1800;
     this.hintTime = 7000;
+    this.plan = null; this.planIdx = 0;
+    this.eventMod = null; this.dark = 0; this.boss = null;
+    this.eventBanner = null; this.eventBannerTime = 0;
+    if (this.mode === "endless") { this.diff = 1; this.theme = null; }
   },
   addScore(n, x, y, crit) {
     this.score += n;
@@ -1023,6 +1507,7 @@ const game = {
   },
 
   startWave() {
+    if (this.mode === "campaign") return this.startCampaignWave();
     this.wave++;
     this.waveActive = true;
     const w = this.wave;
@@ -1030,6 +1515,9 @@ const game = {
     this.spawnGap = Math.max(140, 720 - w * 34);
     this.spawnTimer = 0;
     this.banner = "WAVE " + w; this.bannerTime = 1700;
+    if (this.wave > Progress.data.highestWave) {
+      Progress.data.highestWave = this.wave; Progress.save();
+    }
     SFX.wave();
 
     // weapon unlocks
@@ -1043,35 +1531,143 @@ const game = {
     }
   },
 
+  startCampaignWave() {
+    const spec = this.plan[this.planIdx];
+    this.wave = spec.index;
+    this.waveActive = true;
+    this.spawnTimer = 0;
+    this.eventMod = spec.event ? EVENTS[spec.event] : null;
+    this.dark = 0;
+
+    if (spec.boss) {
+      const world = WORLDS.find(w => w.id === this.cw);
+      this.toSpawn = spec.count;
+      this.spawnGap = 900;
+      this.banner = "BOSS  \u00b7  " + world.boss.name; this.bannerTime = 2600;
+      this.boss = new Boss(world.boss, W / 2, -70, world.diff);
+      zombies.push(this.boss);
+      SFX.wave(); SFX.blast();
+    } else if (this.eventMod) {
+      const e = this.eventMod;
+      this.toSpawn = Math.max(3, Math.round(spec.count * e.countMul));
+      this.spawnGap = Math.max(110, 620 - this.wave * 40);
+      this.eventBanner = e; this.eventBannerTime = 2600;
+      this.banner = null; this.bannerTime = 0;
+      SFX.wave();
+    } else {
+      this.toSpawn = spec.count;
+      this.spawnGap = Math.max(150, 700 - this.wave * 45);
+      this.banner = "WAVE " + this.wave + " / " + this.plan.length; this.bannerTime = 1500;
+      SFX.wave();
+    }
+  },
+
+  /* Campaign hands out the guns on a stage schedule rather than the endless
+     wave numbers, so an early stage never starts you empty-handed. */
+  grantCampaignWeapons() {
+    const give = (i, reserve) => {
+      if (player.unlocked[i]) return;
+      player.unlocked[i] = true;
+      player.ammo[i] = WEAPONS[i].mag;
+      player.reserve[i] = reserve;
+    };
+    const rank = (this.cw - 1) * 5 + this.cs;   // 1..30 across the campaign
+    if (rank >= 3) give(1, 24);
+    if (rank >= 5) give(2, 120);
+  },
+
+  startStage(worldId, stageNo) {
+    const world = WORLDS.find(w => w.id === worldId);
+    this.mode = "campaign";
+    this.cw = worldId; this.cs = stageNo;
+    this.diff = world.diff;
+    this.theme = world.theme;
+    this.reset();
+    this.plan = buildWavePlan(world, stageNo - 1);
+    this.planIdx = 0;
+    this.waveActive = false;
+    this.breakTimer = 2000;
+    this.banner = "STAGE " + String(stageNo).padStart(2, "0") + "  \u00b7  " + world.stages[stageNo - 1].name;
+    this.bannerTime = 2400;
+    this.grantCampaignWeapons();
+  },
+
+  stageStars() {
+    // clearing it earns one; health and accuracy earn the other two
+    const hpFrac = player.hp / player.maxHp;
+    const acc = this.shotsFired ? this.shotsHit / this.shotsFired : 0;
+    let stars = 1;
+    if (hpFrac >= 0.65) stars++;
+    if (acc >= 0.42) stars++;
+    return Math.max(1, Math.min(3, stars));
+  },
+
+  stageComplete() {
+    if (this.state !== "play") return;
+    this.state = "stagedone";
+    const world = WORLDS.find(w => w.id === this.cw);
+    const stage = world.stages[this.cs - 1];
+    this.score += 500 * this.cs + Math.round(player.hp) * 5;
+    const stars = this.stageStars();
+    const res = recordStageResult(this.cw, this.cs, stars, this.score);
+    if (this.score > this.best) {
+      this.best = this.score;
+      localStorage.setItem("deadzone_best", String(this.best));
+    }
+    showStageComplete(world, stage, stars, res);
+    SFX.pickup();
+  },
+
+  grantGear() {
+    player.items.grenade = Math.min(ITEMS.grenade.max, player.items.grenade + 1);
+    if (this.wave % 3 === 0) player.items.shield = Math.min(ITEMS.shield.max, player.items.shield + 1);
+    if (this.wave % 4 === 0) player.items.blast = Math.min(ITEMS.blast.max, player.items.blast + 1);
+    for (let i = 1; i < 3; i++) {
+      if (player.unlocked[i]) player.reserve[i] = Math.min(WEAPONS[i].reserveMax, player.reserve[i] + (i === 1 ? 10 : 50));
+    }
+  },
+
   endWave() {
     this.waveActive = false;
+    if (this.mode === "campaign") {
+      this.eventMod = null; this.dark = 0;
+      this.planIdx++;
+      this.grantGear();
+      if (this.planIdx >= this.plan.length) { this.stageComplete(); return; }
+      this.breakTimer = 2600;
+      this.banner = "WAVE CLEARED"; this.bannerTime = 1600;
+      player.hp = Math.min(player.maxHp, player.hp + 12);
+      SFX.pickup();
+      return;
+    }
     this.breakTimer = 3600;
     const bonus = this.wave * 100 + Math.round(player.hp) * 2;
     this.addScore(bonus, player.x, player.y - 40, true);
     this.banner = "WAVE CLEARED  +" + bonus; this.bannerTime = 2200;
     player.hp = Math.min(player.maxHp, player.hp + 15);
-    // one grenade back each wave, and the rarer gear every few waves
-    player.items.grenade = Math.min(ITEMS.grenade.max, player.items.grenade + 1);
-    if (this.wave % 3 === 0) player.items.shield = Math.min(ITEMS.shield.max, player.items.shield + 1);
-    if (this.wave % 4 === 0) player.items.blast = Math.min(ITEMS.blast.max, player.items.blast + 1);
-    // top up reserves a little between waves
-    for (let i = 1; i < 3; i++) {
-      if (player.unlocked[i]) player.reserve[i] = Math.min(WEAPONS[i].reserveMax, player.reserve[i] + (i === 1 ? 10 : 50));
-    }
+    this.grantGear();
     SFX.pickup();
   },
 
   spawnOne() {
     const w = this.wave;
-    // composition by wave
-    const bag = ["walker", "walker", "walker"];
-    if (w >= 2) bag.push("runner");
-    if (w >= 4) bag.push("runner", "runner");
-    if (w >= 5) bag.push("brute");
-    if (w >= 7) bag.push("spitter");
-    if (w >= 9) bag.push("brute", "spitter", "runner");
-    const type = pick(bag);
-    const buff = 1 + (w - 1) * 0.10;
+    let type, buff;
+    if (this.mode === "campaign") {
+      const spec = this.plan[this.planIdx];
+      const e = this.eventMod;
+      const bag = (e && e.types) ? e.types : spec.bag;
+      type = pick(bag);
+      buff = this.diff * (1 + (w - 1) * 0.06) * (e ? e.hpMul : 1);
+    } else {
+      const bag = ["walker", "walker", "walker"];
+      if (w >= 2) bag.push("runner");
+      if (w >= 4) bag.push("runner", "runner");
+      if (w >= 5) bag.push("brute");
+      if (w >= 7) bag.push("spitter");
+      if (w >= 9) bag.push("brute", "spitter", "runner");
+      type = pick(bag);
+      buff = 1 + (w - 1) * 0.10;
+    }
 
     // spawn just off one edge
     const side = randInt(0, 3);
@@ -1080,7 +1676,9 @@ const game = {
     else if (side === 1) { x = W + pad; y = rand(0, H); }
     else if (side === 2) { x = rand(0, W); y = H + pad; }
     else { x = -pad; y = rand(0, H); }
-    zombies.push(new Zombie(type, x, y, buff));
+    const z = new Zombie(type, x, y, buff);
+    if (this.eventMod && this.eventMod.speedMul) z.speed *= this.eventMod.speedMul;
+    zombies.push(z);
   },
 
   over() {
@@ -1091,16 +1689,208 @@ const game = {
       this.best = this.score;
       localStorage.setItem("deadzone_best", String(this.best));
     }
-    document.getElementById("goStats").innerHTML =
-      `WAVE REACHED: <span>${this.wave}</span><br>` +
+    const acc = this.shotsFired ? Math.round(this.shotsHit / this.shotsFired * 100) : 0;
+    let head = "";
+    if (this.mode === "campaign") {
+      const world = WORLDS.find(w => w.id === this.cw);
+      head = `WORLD ${String(this.cw).padStart(2, "0")} \u00b7 STAGE ${String(this.cs).padStart(2, "0")}<br>` +
+             `<span>${world.stages[this.cs - 1].name}</span><br>` +
+             `WAVE ${this.plan ? Math.min(this.plan.length, this.planIdx + 1) : this.wave} OF ${this.plan ? this.plan.length : "?"}<br>`;
+    } else {
+      head = `WAVE REACHED: <span>${this.wave}</span><br>`;
+    }
+    document.getElementById("goStats").innerHTML = head +
       `ZOMBIES KILLED: <span>${this.kills}</span><br>` +
+      `ACCURACY: <span>${acc}%</span><br>` +
       `SCORE: <span>${this.score.toLocaleString()}</span><br>` +
       `BEST: <span>${this.best.toLocaleString()}</span>`;
+    document.getElementById("goSelect").textContent =
+      this.mode === "campaign" ? "STAGE SELECT" : "MAIN MENU";
+    hideAllScreens();
     document.getElementById("gameover").classList.remove("hidden");
   }
 };
 
+
+/* ================= SCREENS =================
+   One place decides which overlay is up, so no two can stack. */
+const SCREENS = ["menu", "how", "settings", "worlds", "stages", "stagedone", "worlddone", "gameover", "paused"];
+let overlayShown = true;   // cheap mirror of "is any overlay up"
+function showScreen(id) {
+  for (const sc of SCREENS) {
+    const el = document.getElementById(sc);
+    if (el) el.classList.toggle("hidden", sc !== id);
+  }
+  overlayShown = true;
+}
+function hideAllScreens() {
+  for (const sc of SCREENS) {
+    const el = document.getElementById(sc); if (el) el.classList.add("hidden");
+  }
+  overlayShown = false;
+}
+
+const stars = n => "\u2605".repeat(n) + "\u2606".repeat(3 - n);
+const $ = id => document.getElementById(id);
+
+function goMenu() {
+  game.state = "menu";
+  hideAllScreens(); showScreen("menu");
+  checkOrientation();
+}
+
+/* ---- world select ---- */
+function showWorlds() {
+  game.state = "worlds";
+  const grid = $("worldGrid");
+  grid.innerHTML = "";
+  $("worldsSub").textContent = "CAMPAIGN  \u00b7  " + Progress.totalStars() + " / " + (WORLDS.length * 15) + " STARS";
+  for (const w of WORLDS) {
+    const pw = Progress.world(w.id);
+    const card = document.createElement("div");
+    card.className = "card" + (pw.unlocked ? (pw.completed ? " done" : "") : " locked");
+    const num = "WORLD " + String(w.id).padStart(2, "0");
+    if (pw.unlocked) {
+      const cleared = Object.values(pw.stages).filter(x => x.completed).length;
+      card.innerHTML =
+        '<div class="num">' + num + (pw.completed ? '  \u00b7  COMPLETE' : '') + '</div>' +
+        '<div class="nm"></div>' +
+        '<div class="ds"></div>' +
+        '<div class="st">' + "\u2605".repeat(Progress.worldStars(w.id)) +
+          "\u2606".repeat(15 - Progress.worldStars(w.id)) + '</div>' +
+        '<div class="meta">' + cleared + ' / ' + w.stages.length + ' STAGES</div>';
+      card.querySelector(".nm").textContent = w.name;
+      card.querySelector(".ds").textContent = w.desc;
+      card.addEventListener("click", () => { audio(); showStages(w.id); });
+    } else {
+      const prev = WORLDS.find(x => x.id === w.id - 1);
+      card.innerHTML =
+        '<div class="num">' + num + '</div>' +
+        '<div class="nm"></div>' +
+        '<div class="lockTag">\uD83D\uDD12 LOCKED</div>' +
+        '<div class="ds"></div>';
+      card.querySelector(".nm").textContent = w.name;
+      card.querySelector(".ds").textContent = "Complete WORLD " +
+        String(prev ? prev.id : 1).padStart(2, "0") + " to unlock";
+    }
+    grid.appendChild(card);
+  }
+  hideAllScreens(); showScreen("worlds");
+  checkOrientation();
+}
+
+/* ---- stage select ---- */
+function showStages(worldId) {
+  game.state = "stages";
+  game.cw = worldId;
+  const w = WORLDS.find(x => x.id === worldId);
+  $("stagesTitle").textContent = "WORLD " + String(w.id).padStart(2, "0");
+  $("stagesSub").textContent = w.name + "  \u00b7  " + w.desc;
+  const list = $("stageList");
+  list.innerHTML = "";
+  w.stages.forEach((st, i) => {
+    const no = i + 1;
+    const ps = Progress.stage(worldId, no);
+    const row = document.createElement("div");
+    const isCurrent = ps.unlocked && !ps.completed;
+    row.className = "stageRow" + (ps.unlocked ? (isCurrent ? " current" : "") : " locked");
+    row.innerHTML =
+      '<div class="sn">' + String(no).padStart(2, "0") + '</div>' +
+      '<div class="snm"></div>' +
+      '<div class="ss">' + (ps.unlocked ? stars(ps.stars) : "\uD83D\uDD12") + '</div>';
+    row.querySelector(".snm").textContent = st.name;
+    if (st.boss) {
+      const tag = document.createElement("div");
+      tag.className = "boss"; tag.textContent = "BOSS";
+      row.querySelector(".snm").appendChild(tag);
+    }
+    if (ps.unlocked) row.addEventListener("click", () => { audio(); launchStage(worldId, no); });
+    list.appendChild(row);
+  });
+  hideAllScreens(); showScreen("stages");
+  checkOrientation();
+}
+
+function launchStage(worldId, stageNo) {
+  audio();
+  game.startStage(worldId, stageNo);
+  game.state = "play";
+  hideAllScreens();
+  checkOrientation();
+}
+
+/* ---- stage results ---- */
+function showStageComplete(world, stage, starCount, res) {
+  const acc = game.shotsFired ? Math.round(game.shotsHit / game.shotsFired * 100) : 0;
+  const hpPct = Math.round(player.hp / player.maxHp * 100);
+  const best = Progress.stage(world.id, game.cs);
+  $("sdTitle").textContent = stage.boss ? "BOSS DEFEATED" : "STAGE COMPLETE";
+  $("sdName").textContent = stage.name;
+  $("sdStars").textContent = stars(starCount);
+  $("sdStats").innerHTML =
+    '<div class="k">ZOMBIES KILLED</div><div class="v">' + game.kills + '</div>' +
+    '<div class="k">ACCURACY</div><div class="v">' + acc + '%</div>' +
+    '<div class="k">HEADSHOTS</div><div class="v">' + game.headshots + '</div>' +
+    '<div class="k">BEST COMBO</div><div class="v">\u00d7' + game.maxCombo + '</div>' +
+    '<div class="k">HEALTH REMAINING</div><div class="v">' + hpPct + '%</div>' +
+    '<div class="k">SCORE</div><div class="v">' + game.score.toLocaleString() + '</div>' +
+    '<div class="k">BEST</div><div class="v">' + best.best.toLocaleString() + '</div>';
+
+  let note = "";
+  if (res.unlockedStage) note = "STAGE " + String(res.unlockedStage).padStart(2, "0") + " UNLOCKED";
+  else if (!res.unlockedWorld && game.cs >= world.stages.length) note = "WORLD COMPLETE";
+  $("sdUnlock").textContent = note;
+
+  const hasNext = game.cs < world.stages.length;
+  $("sdNext").textContent = hasNext ? "NEXT STAGE" : "WORLD SELECT";
+  $("sdNext").onclick = () => {
+    audio();
+    if (hasNext) launchStage(world.id, game.cs + 1);
+    else showWorlds();
+  };
+  // the boss stage routes through the cinematic first
+  if (!hasNext) { pendingWorldComplete = { world, res, starCount }; }
+  else pendingWorldComplete = null;
+
+  hideAllScreens();
+  if (pendingWorldComplete) showWorldComplete();
+  else showScreen("stagedone");
+  checkOrientation();
+}
+
+let pendingWorldComplete = null;
+
+function showWorldComplete() {
+  const { world, res } = pendingWorldComplete;
+  game.state = "worlddone";
+  const total = Progress.worldStars(world.id);
+  $("wdTitle").textContent = "WORLD " + String(world.id).padStart(2, "0") + " COMPLETE";
+  $("wdLine").textContent = world.desc.replace(/\.$/, "") + "  \u00b7  CONTAINED.";
+  $("wdStars").textContent = "\u2605".repeat(total) + "\u2606".repeat(15 - total);
+  $("wdUnlock").textContent = res.unlockedWorld
+    ? "WORLD " + String(res.unlockedWorld.id).padStart(2, "0") + " UNLOCKED  \u00b7  " + res.unlockedWorld.name
+    : "EVERY WORLD CLEARED";
+  $("wdNext").onclick = () => {
+    audio();
+    const nw = res.unlockedWorld;
+    pendingWorldComplete = null;
+    if (nw) showStages(nw.id); else showWorlds();
+  };
+  hideAllScreens(); showScreen("worlddone");
+  checkOrientation();
+}
+
+/* ---- settings ---- */
+let soundOn = localStorage.getItem("deadzone_sound") !== "0";
+function refreshSettings() {
+  $("setSound").textContent = "SOUND: " + (soundOn ? "ON" : "OFF");
+  $("setInfo").textContent = "CAMPAIGN STARS " + Progress.totalStars() + " / " + (WORLDS.length * 15) +
+    "   \u00b7   ENDLESS BEST " + game.best.toLocaleString() +
+    "   \u00b7   BEST WAVE " + Progress.data.highestWave;
+}
+
 function togglePause() {
+  if (game.state !== "play" && game.state !== "paused") return;
   if (game.state === "play") {
     game.state = "paused";
     document.getElementById("paused").classList.remove("hidden");
@@ -1110,17 +1900,60 @@ function togglePause() {
   }
 }
 
-function startGame() {
+function startEndless() {
   audio();
+  game.mode = "endless";
+  game.theme = null; game.diff = 1;
   game.reset();
   game.state = "play";
-  document.getElementById("menu").classList.add("hidden");
-  document.getElementById("gameover").classList.add("hidden");
-  document.getElementById("paused").classList.add("hidden");
+  hideAllScreens();
+  checkOrientation();
 }
-document.getElementById("startBtn").addEventListener("click", startGame);
-document.getElementById("retryBtn").addEventListener("click", startGame);
-document.getElementById("resumeBtn").addEventListener("click", togglePause);
+
+/* Retry means "this stage again" in campaign, "a new run" in endless. */
+function retry() {
+  if (game.mode === "campaign") launchStage(game.cw, game.cs);
+  else startEndless();
+}
+
+$("campaignBtn").addEventListener("click", () => { audio(); showWorlds(); });
+$("endlessBtn").addEventListener("click", startEndless);
+$("settingsBtn").addEventListener("click", () => { audio(); refreshSettings(); game.state = "settings"; hideAllScreens(); showScreen("settings"); });
+$("howBtn").addEventListener("click", () => { game.state = "how"; hideAllScreens(); showScreen("how"); });
+$("howBack").addEventListener("click", goMenu);
+$("setBack").addEventListener("click", goMenu);
+$("setSound").addEventListener("click", () => {
+  soundOn = !soundOn;
+  localStorage.setItem("deadzone_sound", soundOn ? "1" : "0");
+  refreshSettings();
+});
+$("setReset").addEventListener("click", () => {
+  if ($("setReset").dataset.armed === "1") {
+    Progress.reset();
+    $("setReset").dataset.armed = "";
+    $("setReset").textContent = "RESET CAMPAIGN PROGRESS";
+    refreshSettings();
+  } else {
+    // destructive, so it takes two presses
+    $("setReset").dataset.armed = "1";
+    $("setReset").textContent = "TAP AGAIN TO ERASE";
+  }
+});
+$("worldsBack").addEventListener("click", goMenu);
+$("stagesBack").addEventListener("click", () => { audio(); showWorlds(); });
+$("sdReplay").addEventListener("click", () => launchStage(game.cw, game.cs));
+$("sdSelect").addEventListener("click", () => { audio(); showStages(game.cw); });
+$("retryBtn").addEventListener("click", retry);
+$("goSelect").addEventListener("click", () => {
+  audio();
+  if (game.mode === "campaign") showStages(game.cw); else goMenu();
+});
+$("resumeBtn").addEventListener("click", togglePause);
+$("pauseQuit").addEventListener("click", () => {
+  audio();
+  game.state = "menu";
+  if (game.mode === "campaign") showStages(game.cw); else goMenu();
+});
 
 /* ---------------- collision ---------------- */
 function collide() {
@@ -1131,15 +1964,22 @@ function collide() {
       if (z.dead) continue;
       const rr = (z.r + 3) * (z.r + 3);
       // sample along the bullet's step so fast rounds don't tunnel
-      let hit = false;
+      let hit = false, hx = 0, hy = 0;
       const steps = 3;
       for (let s = 0; s <= steps; s++) {
         const t = s / steps;
         const sx = lerp(b.px, b.x, t), sy = lerp(b.py, b.y, t);
-        if (dist2(sx, sy, z.x, z.y) < rr) { hit = true; break; }
+        if (dist2(sx, sy, z.x, z.y) < rr) { hit = true; hx = sx; hy = sy; break; }
       }
       if (hit) {
         const nx = b.vx / (Math.hypot(b.vx, b.vy) || 1), ny = b.vy / (Math.hypot(b.vx, b.vy) || 1);
+        game.shotsHit++;
+        // the head is drawn at r*0.45 along the facing -- measure against it
+        // so the stat reflects a real hit location, not an invented number
+        const headX = z.x + Math.cos(z.angle) * z.r * 0.45;
+        const headY = z.y + Math.sin(z.angle) * z.r * 0.45;
+        const hr = z.r * 0.52;
+        if (dist2(hx, hy, headX, headY) < hr * hr) game.headshots++;
         z.hurt(b.dmg, nx * b.knock, ny * b.knock);
         b.dead = true;
         break;
@@ -1229,22 +2069,27 @@ function update(dt) {
   game.shake *= Math.pow(0.88, dt);
   game.redFlash *= Math.pow(0.90, dt);
   game.flash *= Math.pow(0.84, dt);
+  const wantDark = (game.eventMod && game.eventMod.dark) ? 0.92
+                 : (game.theme && game.theme.dark ? 0.5 : 0);
+  game.dark += (wantDark - game.dark) * Math.min(1, 0.05 * dt);
+  if (game.eventBannerTime > 0) game.eventBannerTime -= 16.6 * dt;
   if (player.shieldFlash > 0) player.shieldFlash -= 16.6 * dt;
 }
 
 /* ---------------- render ---------------- */
 function drawGround(g) {
-  g.fillStyle = "#171c14";
+  // each world paints the same shapes with its own palette -- no assets
+  const t = game.theme;
+  g.fillStyle = t ? t.ground : "#171c14";
   g.fillRect(0, 0, W, H);
-  // subtle asphalt grid
-  g.strokeStyle = "rgba(255,255,255,.028)";
+  g.strokeStyle = t ? t.grid : "rgba(255,255,255,.028)";
   g.lineWidth = 1;
   g.beginPath();
   for (let x = 0; x <= W; x += 48) { g.moveTo(x, 0); g.lineTo(x, H); }
   for (let y = 0; y <= H; y += 48) { g.moveTo(0, y); g.lineTo(W, y); }
   g.stroke();
-  // vignette-ish border
-  g.strokeStyle = "rgba(125,213,63,.16)";
+  if (t && t.tint) { g.fillStyle = t.tint; g.fillRect(0, 0, W, H); }
+  g.strokeStyle = t ? t.edge : "rgba(125,213,63,.16)";
   g.lineWidth = 3;
   g.strokeRect(1.5, 1.5, W - 3, H - 3);
 }
@@ -1397,7 +2242,9 @@ function drawHUD(g) {
 
   g.fillStyle = "#7dd53f";
   g.font = "bold 18px 'Courier New', monospace";
-  g.fillText("WAVE " + game.wave, W - 16, 84);
+  g.fillText(game.mode === "campaign" && game.plan
+    ? "WAVE " + Math.min(game.plan.length, game.planIdx + 1) + "/" + game.plan.length
+    : "WAVE " + game.wave, W - 16, 84);
   g.fillStyle = "#9aa694";
   g.font = "bold 12px 'Courier New', monospace";
   const remaining = game.waveActive ? (game.toSpawn + zombies.length) : 0;
@@ -1413,6 +2260,59 @@ function drawHUD(g) {
     g.font = "bold 22px 'Courier New', monospace";
     g.fillText("x" + game.combo + " COMBO", W / 2, 34);
     g.globalAlpha = 1;
+  }
+
+  // boss health bar across the top
+  if (game.boss && !game.boss.dead) {
+    // sit between the left HUD column and the right-hand score block so the
+    // bar never overlaps the player's own health readout
+    const lPad = 250, rPad = 200;
+    const avail = Math.max(180, W - lPad - rPad);
+    const bw = Math.min(620, avail), bx = lPad + (avail - bw) / 2, by = 30, bh = 15;
+    const cx = bx + bw / 2;
+    const frac = clamp(game.boss.hp / game.boss.maxHp, 0, 1);
+    g.textAlign = "center";
+    g.font = "bold 15px 'Courier New', monospace";
+    g.fillStyle = game.boss.enraged ? "#ff5252" : "#e6c0c0";
+    g.fillText(game.boss.name + (game.boss.enraged ? "  \u00b7  ENRAGED" : ""), cx, by - 6);
+    g.fillStyle = "rgba(0,0,0,.7)"; g.fillRect(bx, by, bw, bh);
+    g.fillStyle = game.boss.enraged ? "#ff3b3b" : "#b3121b";
+    g.fillRect(bx, by, bw * frac, bh);
+    // segment ticks so chip damage is readable
+    g.strokeStyle = "rgba(0,0,0,.45)"; g.lineWidth = 1;
+    for (let i = 1; i < 10; i++) {
+      const sx = bx + bw * (i / 10);
+      g.beginPath(); g.moveTo(sx, by); g.lineTo(sx, by + bh); g.stroke();
+    }
+    g.strokeStyle = game.boss.enraged ? "#ff8080" : "rgba(255,255,255,.4)";
+    g.lineWidth = 2; g.strokeRect(bx + .5, by + .5, bw - 1, bh - 1);
+  }
+
+  // special event announcement
+  if (game.eventBannerTime > 0 && game.eventBanner) {
+    const a = clamp(game.eventBannerTime / 700, 0, 1);
+    g.save();
+    g.globalAlpha = a; g.textAlign = "center";
+    g.fillStyle = "#b3121b";
+    g.font = "bold 16px 'Courier New', monospace";
+    g.fillText("\u26A0  SPECIAL EVENT  \u26A0", W / 2, H / 2 - 96);
+    g.fillStyle = "#ffd76a";
+    g.font = "bold 44px 'Courier New', monospace";
+    g.fillText(game.eventBanner.name, W / 2, H / 2 - 50);
+    g.fillStyle = "#cfd6c9";
+    g.font = "bold 14px 'Courier New', monospace";
+    g.fillText(game.eventBanner.tag, W / 2, H / 2 - 24);
+    g.restore();
+  }
+
+  // campaign progress readout
+  if (game.mode === "campaign" && game.plan) {
+    g.textAlign = "right";
+    g.font = "bold 11px 'Courier New', monospace";
+    g.fillStyle = "#7f8a79";
+    const world = WORLDS.find(w => w.id === game.cw);
+    g.fillText("W" + String(game.cw).padStart(2, "0") + " \u00b7 S" + String(game.cs).padStart(2, "0") +
+      " \u00b7 " + world.stages[game.cs - 1].name, W - 16, 138);
   }
 
   // banner
@@ -1528,6 +2428,17 @@ function render() {
 
   ctx.restore();
 
+  // blackout / night: punch a light around the player out of a dark sheet
+  if (game.dark > 0.02) {
+    const lr = 190 + Math.sin(game.time / 400) * 10;
+    const grd = ctx.createRadialGradient(player.x, player.y, lr * 0.25, player.x, player.y, lr);
+    grd.addColorStop(0, "rgba(4,6,8,0)");
+    grd.addColorStop(0.65, "rgba(4,6,8," + (game.dark * 0.55).toFixed(3) + ")");
+    grd.addColorStop(1, "rgba(4,6,8," + game.dark.toFixed(3) + ")");
+    ctx.fillStyle = grd;
+    ctx.fillRect(0, 0, W, H);
+  }
+
   // explosion whiteout
   if (game.flash > 0.01) {
     ctx.fillStyle = "rgba(255,245,220," + (game.flash * 0.34).toFixed(3) + ")";
@@ -1602,14 +2513,19 @@ function frame(now) {
   last = now;
   dt = clamp(dt, 0, 3);              // don't explode after a tab switch
 
-  if (game.state === "play") update(dt);
+  if (game.state === "play") {
+    // state and overlays must never disagree -- a stale panel over live
+    // gameplay would be unplayable, so the loop enforces it
+    if (overlayShown) hideAllScreens();
+    update(dt);
+  }
   render();
   requestAnimationFrame(frame);
 }
 
 resize();
 game.reset();
-game.state = "menu";
+goMenu();
 requestAnimationFrame(frame);
 </script>
 </body>

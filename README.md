@@ -44,6 +44,46 @@ position, every heading is reachable — including straight back over the
 hand that is moving you. The playfield width follows the screen aspect
 ratio, so the game fills a phone edge to edge.
 
+## Campaign
+
+Two modes from the main menu: **CAMPAIGN** and **ENDLESS**. Endless is the
+original survival mode, untouched.
+
+Campaign runs **6 worlds x 5 stages**. Worlds and stages unlock strictly in
+order: World 1 Stage 1 is open, clearing a stage opens the next, and clearing
+a world's boss stage opens the next world. Nothing is entered by hand.
+
+| World | Name | Theme |
+|---|---|---|
+| 01 | THE OUTBREAK | abandoned suburb |
+| 02 | DEAD CITY | ruined city |
+| 03 | NIGHTFALL | night, permanently dim |
+| 04 | INFECTED FACTORY | industrial |
+| 05 | THE QUARANTINE | hospital |
+| 06 | THE WASTELANDS | open wasteland |
+
+Themes are canvas-only (ground, grid, edge and tint colours) — no image assets.
+
+**Stages** are fixed-length, not endless: 5 waves normally, 10 for a boss
+stage. Enemy types are introduced one at a time across a stage's waves, and
+the wave that introduces a type is weighted toward it, so you meet each new
+threat on its own before it gets mixed in. World 1 Stage 1 runs walkers,
+walkers, runner-heavy, mixed, then a special event.
+
+**Special events** land on every 5th wave, announced before the wave starts:
+BLOOD RUSH (many weak zombies), ZOMBIE FRENZY (much faster), BRUTE INVASION
+(brutes only), BLACKOUT (vision cut to a light around you), INFECTION
+(spitter-heavy).
+
+**Bosses** hold the 5th stage of each world, appearing on the final wave with
+a health bar across the top. World 1's is **THE BUTCHER** — 950 HP (5x a
+brute), much larger, telegraphed charge attacks, summons zombies, and enters
+a faster enraged state below 30% health.
+
+**Stars** are 1-3 per stage: one for clearing it, one for finishing above 65%
+health, one for 42%+ accuracy. A replay can only raise a rating, never lower
+it.
+
 ## How it plays
 
 Zombies spawn off-screen and close in from every edge. Clear the wave, get a
@@ -87,6 +127,23 @@ scaled by wave number and remaining health. Best score persists in
 `localStorage`.
 
 **Drops** — dead zombies sometimes leave medkits (+25 HP) or ammo boxes.
+
+## Save data
+
+Two independent keys, so campaign progress and the endless high score never
+interfere:
+
+- `deadzone_best` — endless high score (pre-existing, untouched)
+- `deadzone_campaign_v1` — unlocked/completed worlds and stages, best stars
+  and best score per stage, highest endless wave
+- `deadzone_sound` — sound on/off
+
+The campaign save is merged over a freshly-generated blank structure on load,
+so adding worlds or stages later will not wipe an existing save. Corrupt or
+unavailable storage falls back to a new save rather than throwing.
+
+Adding content means editing the `WORLDS` array (and `EVENTS` for new event
+types) — the progression, unlock, star and save logic is generic over it.
 
 ## Structure
 
