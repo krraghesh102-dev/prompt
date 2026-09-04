@@ -161,6 +161,36 @@ scaled by wave number and remaining health. Best score persists in
 
 **Drops** — dead zombies sometimes leave medkits (+25 HP) or ammo boxes.
 
+## Power-ups
+
+**Magnet** — a horseshoe magnet dropped by zombies. Collecting it activates
+immediately (no key, no button, works the same on desktop and touch) and for
+10 seconds every collectible within 250px accelerates toward you and is
+picked up normally. Items track your live position, so they follow you while
+you move, and a drop created *during* the effect is pulled in straight away.
+
+Collecting a second magnet while one is running **refills the timer to full
+rather than stacking** — there is only ever one effect. When it expires,
+attraction stops and any items that never reached you stay on the ground as
+ordinary pickups.
+
+Drop chance is per enemy class: 3.5% from normal zombies, 9% from brutes,
+guaranteed from a boss. The roll is separate from the gear roll, so a magnet
+never displaces an ammo or health drop.
+
+All of it is tuned from one table:
+
+```js
+const MAGNET_CONFIG = {
+  duration: 10000, radius: 250, accel: 0.55, maxSpeed: 7.5,
+  drop: { normal: 0.035, brute: 0.09, boss: 1.0 }
+};
+```
+
+Timed effects live in a `POWERUPS` registry that the pickup, HUD and drop
+systems are generic over, so a future speed or damage boost is a new entry
+plus its art — not a change to the pickup system.
+
 ## Save data
 
 Two independent keys, so campaign progress and the endless high score never

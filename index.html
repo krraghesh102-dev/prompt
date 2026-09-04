@@ -508,6 +508,8 @@ const SFX = {
   shieldOn:() => { blip("sine", 300, 0.18, 0.08, 780); setTimeout(() => blip("sine", 640, 0.22, 0.07, 900), 120); },
   shieldHit:() => blip("sine", 900, 0.10, 0.07, 420),
   shieldOff:() => blip("sine", 620, 0.26, 0.06, 180),
+  magnet:  () => { blip("sine", 520, 0.10, 0.06, 880); setTimeout(() => blip("sine", 880, 0.14, 0.05, 1250), 90); },
+  slurp:   () => blip("sine", 700, 0.05, 0.035, 1100),
   blast:   () => { noise(0.7, 0.32, 1600); blip("sawtooth", 150, 0.6, 0.15, 34);
                    setTimeout(() => blip("square", 90, 0.35, 0.10, 30), 90); }
 };
@@ -1635,6 +1637,46 @@ function zombieSkinSet() {
   return th && ZSKINS[th.zombieSet] ? ZSKINS[th.zombieSet] : null;
 }
 
+
+/* ================= POWER-UPS =================
+   A timed-effect registry. Effects never stack: collecting one that is
+   already running refills its timer to full. Adding a future power-up
+   (speed, damage, slow-mo) means adding an entry here plus its art -- the
+   pickup, HUD and drop systems are generic over this table. */
+const MAGNET_CONFIG = {
+  duration: 10000,     // ms the effect lasts
+  radius: 250,         // world px an item is pulled from
+  accel: 0.55,         // px/frame^2, ramps up as the item closes
+  maxSpeed: 7.5,       // px/frame cap, so items fly rather than teleport
+  drop: { normal: 0.035, brute: 0.09, boss: 1.0 }   // spawn chance by enemy class
+};
+
+const POWERUPS = {
+  magnet: {
+    name: "MAGNET", color: "#4fd2ff", glow: "rgba(79,210,255,",
+    duration: MAGNET_CONFIG.duration,
+    onActivate() { game.toast("MAGNET ACTIVATED", "#4fd2ff"); },
+    onRefill()   { game.toast("MAGNET REFILLED", "#4fd2ff"); }
+  }
+};
+
+/* Collecting an active power-up refills it instead of stacking a second one. */
+function activatePowerup(key) {
+  const pu = POWERUPS[key];
+  if (!pu) return;
+  const already = powerupActive(key);
+  player.powerups[key] = game.time + pu.duration;
+  if (already) { if (pu.onRefill) pu.onRefill(); }
+  else if (pu.onActivate) pu.onActivate();
+  SFX.magnet();
+}
+function powerupActive(key) { return game.time < (player.powerups[key] || 0); }
+function powerupLeft(key) { return Math.max(0, (player.powerups[key] || 0) - game.time); }
+
+/* Which pickups a magnet may pull. Zombies, bosses, bullets, spits, grenades
+   and props are deliberately absent -- only collectibles move. */
+function isMagnetic(pickup) { return !!pickup && !pickup.dead; }
+
 /* ---------------- entities ---------------- */
 class Player {
   constructor() { this.reset(); }
@@ -1658,6 +1700,8 @@ class Player {
     this.shieldUntil = 0;      // timestamp the security layer drops
     this.shieldFlash = 0;      // brief flare when it absorbs a hit
     this.blastReady = 0;       // cooldown gate so one click is one blast
+    this.powerups = {};        // key -> expiry timestamp (see POWERUPS)
+    this._puWas = {};          // edge detection for the expiry notice
   }
   get shielded() { return game.time < this.shieldUntil; }
   get weapon() { return WEAPONS[this.wi]; }
@@ -1936,6 +1980,12 @@ class Zombie {
     decals.push({ x: this.x, y: this.y, r: this.r * rand(1.1, 1.8), a: 0.5 });
     if (decals.length > 90) decals.shift();
     // drops
+    // power-up roll is separate from the gear roll, so a magnet never
+    // displaces an ammo or health drop
+    const tier = this.isBoss ? "boss" : (this.type === "brute" ? "brute" : "normal");
+    if (Math.random() < MAGNET_CONFIG.drop[tier]) {
+      pickups.push(new Pickup(this.x, this.y, "magnet"));
+    }
     const roll = Math.random();
     if (roll < 0.09) pickups.push(new Pickup(this.x, this.y, "health"));
     else if (roll < 0.25) pickups.push(new Pickup(this.x, this.y, "ammo"));
@@ -2266,12 +2316,45 @@ class Pickup {
   constructor(x, y, kind) {
     this.x = x; this.y = y; this.kind = kind;
     this.life = 14000; this.dead = false; this.bob = rand(0, TAU);
+    this.vx = 0; this.vy = 0; this.magnetized = false;
   }
   update(dt) {
     this.life -= 16.6 * dt; this.bob += 0.09 * dt;
     if (this.life <= 0) this.dead = true;
+
+    // Magnet: re-evaluated every frame against the player's live position,
+    // so items track a moving player and drops created mid-effect are
+    // eligible immediately.
+    const dx = player.x - this.x, dy = player.y - this.y;
+    const d2 = dx * dx + dy * dy;
+    const R = MAGNET_CONFIG.radius;
+    if (powerupActive("magnet") && d2 < R * R && isMagnetic(this)) {
+      const d = Math.sqrt(d2) || 1;
+      const pull = MAGNET_CONFIG.accel * (0.45 + 0.55 * (1 - d / R));
+      this.vx += (dx / d) * pull * dt;
+      this.vy += (dy / d) * pull * dt;
+      const sp = Math.hypot(this.vx, this.vy);
+      if (sp > MAGNET_CONFIG.maxSpeed) {
+        this.vx = this.vx / sp * MAGNET_CONFIG.maxSpeed;
+        this.vy = this.vy / sp * MAGNET_CONFIG.maxSpeed;
+      }
+      this.magnetized = true;
+    } else if (this.magnetized) {
+      // effect ended or the item left the radius: coast to a stop and go
+      // back to being an ordinary pickup rather than vanishing
+      this.vx *= Math.pow(0.88, dt); this.vy *= Math.pow(0.88, dt);
+      if (Math.abs(this.vx) < 0.02 && Math.abs(this.vy) < 0.02) {
+        this.vx = this.vy = 0; this.magnetized = false;
+      }
+    }
+    if (this.vx || this.vy) { this.x += this.vx * dt; this.y += this.vy * dt; }
+
     if (dist2(this.x, this.y, player.x, player.y) < 24 * 24) {
       this.dead = true;
+      if (POWERUPS[this.kind]) {
+        activatePowerup(this.kind);
+        return;                          // its own sound already played
+      }
       if (ITEMS[this.kind]) {
         const it = ITEMS[this.kind];
         if (player.items[this.kind] >= it.max) {
@@ -2300,11 +2383,37 @@ class Pickup {
     }
   }
   draw(g) {
-    const y = this.y + Math.sin(this.bob) * 3;
+    const y = this.y + (this.magnetized ? 0 : Math.sin(this.bob) * 3);
     const blink = this.life < 3000 && Math.floor(this.life / 150) % 2 === 0;
     if (blink) return;
+    if (this.magnetized) {
+      g.save();
+      g.globalAlpha = 0.5; g.strokeStyle = "#4fd2ff"; g.lineWidth = 1.6;
+      g.beginPath(); g.moveTo(this.x, y); g.lineTo(this.x - this.vx * 2.4, y - this.vy * 2.4); g.stroke();
+      g.restore();
+    }
     g.save(); g.translate(this.x, y);
-    if (ITEMS[this.kind]) {
+    if (POWERUPS[this.kind]) {
+      const pu = POWERUPS[this.kind];
+      const pulse = 0.55 + Math.sin(game.time / 180) * 0.45;
+      g.globalAlpha = 0.18 + pulse * 0.22;         // halo
+      g.fillStyle = pu.color;
+      g.beginPath(); g.arc(0, 0, 16 + pulse * 4, 0, TAU); g.fill();
+      g.globalAlpha = 1;
+      g.rotate(Math.sin(game.time / 420) * 0.25);   // slow float
+      // horseshoe body
+      g.strokeStyle = "#d8d8e0"; g.lineWidth = 5.5; g.lineCap = "butt";
+      g.beginPath(); g.arc(0, 1, 6.5, Math.PI, 0); g.stroke();
+      g.beginPath(); g.moveTo(-6.5, 1); g.lineTo(-6.5, 8);
+      g.moveTo(6.5, 1); g.lineTo(6.5, 8); g.stroke();
+      // poles
+      g.strokeStyle = "#e8484f"; g.lineWidth = 5.5;
+      g.beginPath(); g.moveTo(-6.5, 5); g.lineTo(-6.5, 9); g.stroke();
+      g.strokeStyle = "#4fa8ff";
+      g.beginPath(); g.moveTo(6.5, 5); g.lineTo(6.5, 9); g.stroke();
+      g.strokeStyle = pu.glow + (0.35 + pulse * 0.35) + ")"; g.lineWidth = 1.6;
+      g.beginPath(); g.arc(0, 0, 13, 0, TAU); g.stroke();
+    } else if (ITEMS[this.kind]) {
       const it = ITEMS[this.kind];
       g.fillStyle = "#12160f"; g.fillRect(-10, -10, 20, 20);
       g.strokeStyle = it.color; g.lineWidth = 2; g.strokeRect(-10, -10, 20, 20);
@@ -3074,6 +3183,13 @@ function update(dt) {
     }
   }
   if (player.shieldFlash > 0) player.shieldFlash -= 16.6 * dt;
+  // announce a power-up ending exactly once
+  for (const key in POWERUPS) {
+    const on = powerupActive(key);
+    if (player._puWas === undefined) player._puWas = {};
+    if (player._puWas[key] && !on) game.toast(POWERUPS[key].name + " EXPIRED", "#7f8a79");
+    player._puWas[key] = on;
+  }
 }
 
 /* ---------------- render ---------------- */
@@ -3337,6 +3453,37 @@ function drawHUD(g) {
     }
   }
 
+  // active power-ups: only shown while running
+  {
+    let row = 0;
+    for (const key in POWERUPS) {
+      if (!powerupActive(key)) continue;
+      const pu = POWERUPS[key], left = powerupLeft(key);
+      const frac = clamp(left / pu.duration, 0, 1);
+      const bx = 16, by = H - 132 - row * 46, bw = 172, bh = 30;
+      g.fillStyle = "rgba(0,0,0,.62)"; g.fillRect(bx, by, bw, bh);
+      g.strokeStyle = pu.color; g.lineWidth = 2; g.strokeRect(bx + .5, by + .5, bw - 1, bh - 1);
+      // smooth drain bar
+      g.fillStyle = pu.glow + "0.30)";
+      g.fillRect(bx + 2, by + 2, (bw - 4) * frac, bh - 4);
+      // small magnet glyph
+      g.save(); g.translate(bx + 17, by + bh / 2);
+      g.strokeStyle = "#d8d8e0"; g.lineWidth = 3.4;
+      g.beginPath(); g.arc(0, 1, 4.2, Math.PI, 0); g.stroke();
+      g.beginPath(); g.moveTo(-4.2, 1); g.lineTo(-4.2, 6); g.moveTo(4.2, 1); g.lineTo(4.2, 6); g.stroke();
+      g.strokeStyle = "#e8484f"; g.beginPath(); g.moveTo(-4.2, 4); g.lineTo(-4.2, 6.5); g.stroke();
+      g.strokeStyle = "#4fa8ff"; g.beginPath(); g.moveTo(4.2, 4); g.lineTo(4.2, 6.5); g.stroke();
+      g.restore();
+      g.fillStyle = pu.color;
+      g.font = "bold 12px 'Courier New', monospace"; g.textAlign = "left";
+      g.fillText(pu.name, bx + 32, by + 13);
+      g.fillStyle = "#e9efe4";
+      g.font = "bold 13px 'Courier New', monospace";
+      g.fillText((left / 1000).toFixed(1) + "s", bx + 32, by + 25);
+      row++;
+    }
+  }
+
   // score / wave (right side)
   g.textAlign = "right";
   g.fillStyle = "#e9efe4";
@@ -3504,6 +3651,37 @@ function render() {
   for (const g of grenades) g.draw(ctx);
   for (const z of zombies) z.draw(ctx);
   player.draw(ctx);
+
+  // magnetic field: a pulsing ring plus motes drawn inward. Procedural from
+  // game.time, so it allocates nothing per frame.
+  if (powerupActive("magnet")) {
+    const left = powerupLeft("magnet");
+    const R = MAGNET_CONFIG.radius;
+    const pulse = (game.time % 1400) / 1400;               // 0..1 sweep
+    const expiring = left < 2000 && Math.floor(left / 160) % 2 === 0;
+    ctx.save();
+    ctx.globalAlpha = expiring ? 0.08 : 0.16;
+    ctx.strokeStyle = "#4fd2ff"; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(player.x, player.y, R * (0.25 + pulse * 0.75), 0, TAU); ctx.stroke();
+    ctx.globalAlpha = expiring ? 0.10 : 0.22;
+    ctx.beginPath(); ctx.arc(player.x, player.y, R, 0, TAU); ctx.stroke();
+    ctx.setLineDash([4, 10]);
+    ctx.globalAlpha = expiring ? 0.10 : 0.20;
+    ctx.beginPath(); ctx.arc(player.x, player.y, player.r + 22, 0, TAU); ctx.stroke();
+    ctx.setLineDash([]);
+    // 8 motes spiralling in
+    ctx.fillStyle = "#8fe4ff";
+    for (let i = 0; i < 8; i++) {
+      const t = ((game.time / 900) + i / 8) % 1;
+      const rr = R * (1 - t) * 0.9 + 12;
+      const a = i * TAU / 8 + game.time / 700;
+      ctx.globalAlpha = (expiring ? 0.25 : 0.55) * (1 - Math.abs(t - 0.5) * 1.2);
+      ctx.beginPath();
+      ctx.arc(player.x + Math.cos(a) * rr, player.y + Math.sin(a) * rr, 2.2, 0, TAU);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
 
   // full-body security layer
   if (player.shielded) {
