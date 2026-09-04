@@ -157,6 +157,32 @@
   .wallet .gem  { color: #8cf0ff; border-color: #2c5a66; }
   .wallet .coin::before { content: "\25CF"; font-size: 13px; }
   .wallet .gem::before  { content: "\25C6"; font-size: 13px; }
+  /* mission cards: the stage-row visual language, with a progress bar */
+  .msCard {
+    background: rgba(12,16,10,.85); border: 2px solid #34402a;
+    padding: 13px 16px; text-align: left; display: grid;
+    grid-template-columns: auto 1fr auto; gap: 4px 14px; align-items: center;
+  }
+  .msCard.done { border-color: #7dd53f; }
+  .msCard.claimed { opacity: .5; }
+  .msCard .mIcon { font-size: 26px; grid-column: 1; grid-row: 1 / span 3; color: #ffd76a; line-height: 1; }
+  .msCard .mName { grid-column: 2; grid-row: 1; font-size: 16px; letter-spacing: 2px; color: var(--toxic); }
+  .msCard .mDesc { grid-column: 2; grid-row: 2; font-size: 12px; letter-spacing: 1px; color: #93a08b; }
+  .msCard .mBarWrap { grid-column: 2; grid-row: 3; height: 9px; background: rgba(0,0,0,.6);
+                      border: 1px solid #34402a; margin-top: 3px; position: relative; }
+  .msCard .mBar { height: 100%; background: #7dd53f; transition: width .2s; }
+  /* the count rides the bar's own row, so it can never land on the button */
+  .msCard .mNums { font-size: 11px; letter-spacing: 1px; color: #cfd6c9;
+                   white-space: nowrap; align-self: center; }
+  .msCard .mRight { grid-column: 3; grid-row: 1 / span 3; display: flex;
+                    flex-direction: column; align-items: flex-end;
+                    justify-content: center; gap: 5px; }
+  .msCard .mRew { font-size: 12px; letter-spacing: 1px; color: #ffd76a; white-space: nowrap; }
+  .msCard .mRew .g { color: #8cf0ff; }
+  .msCard button { padding: 9px 18px; font-size: 13px; min-width: 96px; letter-spacing: 2px; }
+  .msCard .mState { font-size: 12px; letter-spacing: 2px; color: #7f8a79; white-space: nowrap; }
+  .msCard .mState.ok { color: #7dd53f; }
+  .msCard .mState.fail { color: #ff6b6b; }
   .stack { display: flex; flex-direction: column; gap: 9px; width: 100%; }
 
   .results { display: grid; grid-template-columns: 1fr auto; gap: 5px 18px; font-size: 13px;
@@ -185,6 +211,19 @@
     .bigStars { font-size: 30px; margin: 4px 0 10px; }
     .results { font-size: 12px; margin-bottom: 12px; }
     .menuBtns button { min-width: 200px; }
+    .msCard { padding: 6px 10px; gap: 1px 9px; }
+    .msCard .mIcon { font-size: 18px; }
+    .msCard .mName { font-size: 12px; letter-spacing: 1px; }
+    .msCard .mDesc { font-size: 10px; letter-spacing: 0; }
+    .msCard .mBarWrap { height: 7px; margin-top: 2px; }
+    .msCard .mRew { font-size: 11px; }
+    .msCard .mNums { font-size: 10px; }
+    .msCard .mState { font-size: 10px; letter-spacing: 1px; }
+    /* still a real tap target, just not a tall one */
+    .msCard button { padding: 11px 12px; font-size: 11px; min-width: 84px; }
+    #missions .stack { gap: 6px; }
+    #missions .backRow { margin-top: 10px; }
+    #missions .backRow button { padding: 9px 16px; }
     .wallet { gap: 7px; margin-bottom: 8px; }
     .wallet span { padding: 4px 10px; font-size: 12px; letter-spacing: 1px; }
     .pausePanel { padding: 14px 16px; max-width: 340px; }
@@ -207,10 +246,20 @@
     <div class="menuBtns">
       <button id="campaignBtn">CAMPAIGN</button>
       <button id="endlessBtn">ENDLESS</button>
+      <button class="ghost" id="missionsBtn">MISSIONS</button>
       <button class="ghost" id="settingsBtn">SETTINGS</button>
       <button class="ghost" id="howBtn">CONTROLS</button>
     </div>
     <div id="touchNote">Rotate to landscape to play.</div>
+  </div>
+</div>
+
+<div id="missions" class="overlay hidden">
+  <div class="panel wide">
+    <h2>DAILY MISSIONS</h2>
+    <div class="sub" id="msSub">resets daily</div>
+    <div class="stack" id="msList"></div>
+    <div class="backRow"><button class="ghost" id="msBack">MAIN MENU</button></div>
   </div>
 </div>
 
@@ -803,7 +852,7 @@ const Progress = {
       worlds[w.id] = { unlocked: UNLOCK_ALL || w.id === 1, completed: false, introSeen: false, stages };
     }
     return { version: 1, worlds, highestWave: 0, weapons: ["pistol"], abilities: [],
-             upgrades: {}, seenMagnet: false, coins: 0, gems: 0 };
+             upgrades: {}, seenMagnet: false, coins: 0, gems: 0, missions: null };
   },
   load() {
     try {
@@ -867,6 +916,9 @@ const Progress = {
     // simply starts at zero rather than losing anything else
     base.coins = Math.max(0, saved.coins | 0);
     base.gems  = Math.max(0, saved.gems  | 0);
+    // missions are rebuilt for today on first use; an older save simply has
+    // none, and Missions.ensure() fills it in without touching anything else
+    base.missions = (saved.missions && typeof saved.missions === "object") ? saved.missions : null;
     base.weapons = ["pistol"];
     if (Array.isArray(saved.weapons)) {
       for (const id of saved.weapons) {
@@ -2549,7 +2601,7 @@ function updateAirStrike(dt) {
     // reuse the shared explosion: same damage falloff, death, score, combo
     // and boss handling as every other explosive in the game
     explode(m.x, m.y, player.airRadius || c.explosionRadius,
-            player.airDamage || c.damage, c.knock, "#ff9a3c", true);
+            player.airDamage || c.damage, c.knock, "#ff9a3c", true, "ability");
     SFX.boom();
   }
   if (airStrike.elapsed >= airStrike.endsAt) {
@@ -2722,6 +2774,182 @@ function awardKillCoin() {
   }
 }
 
+/* ================= MISSIONS =================
+   Data-driven. A mission names an event type and how much a given event is
+   worth; the engine does the rest, so a new mission is a row in the pool
+   rather than new plumbing. `mode` decides how progress accumulates:
+   "sum" adds each event, "max" keeps the best single value seen (used by
+   reach-a-combo and no-damage-streak style goals).
+
+   Categories exist so weekly / campaign / achievement sets can be added
+   later without touching the engine -- only `daily` is generated today. */
+const MISSION_CONFIG = {
+  dailyCount: 3,
+  rewards: {
+    easy:   { coins: 100 },
+    medium: { coins: 200 },
+    hard:   { coins: 300, gems: 1 }
+  },
+  noDamageSeconds: 45,
+  pool: [
+    { id: "kill_zombies", cat: "daily", icon: "\u2620", title: "ZOMBIE HUNTER",
+      desc: "Kill 100 zombies", event: "zombie_killed", target: 100, tier: "easy",
+      inc: () => 1 },
+    { id: "headshots", cat: "daily", icon: "\u25CE", title: "DEADLY AIM",
+      desc: "Land 25 headshots", event: "headshot", target: 25, tier: "medium",
+      inc: () => 1 },
+    { id: "waves", cat: "daily", icon: "\u224B", title: "WAVE SURVIVOR",
+      desc: "Survive 10 waves", event: "wave_completed", target: 10, tier: "medium",
+      inc: () => 1 },
+    { id: "brutes", cat: "daily", icon: "\u25A0", title: "BRUTE SLAYER",
+      desc: "Kill 10 brutes", event: "zombie_killed", target: 10, tier: "hard",
+      inc: d => (d.enemyType === "brute" || d.enemyType === "tank") ? 1 : 0 },
+    { id: "no_medkit", cat: "daily", icon: "\u2716", title: "FIELD MEDIC",
+      desc: "Clear a stage without a health pickup", event: "stage_completed",
+      target: 1, tier: "medium", runFail: d => d.kind === "health",
+      failEvent: "pickup_collected", inc: () => 1 },
+    { id: "combo", cat: "daily", icon: "\u26A1", title: "KILL STREAK",
+      desc: "Reach a 20x combo", event: "combo", target: 20, tier: "hard",
+      mode: "max", inc: d => d.combo },
+    { id: "gunner", cat: "daily", icon: "\u2318", title: "GUNNER",
+      desc: "Kill 60 zombies with the pistol", event: "zombie_killed", target: 60,
+      tier: "medium", inc: d => d.weapon === "pistol" ? 1 : 0 },
+    { id: "explosive", cat: "daily", icon: "\u2739", title: "DEMOLITION",
+      desc: "Kill 25 zombies with abilities", event: "zombie_killed", target: 25,
+      tier: "medium", inc: d => d.source === "ability" ? 1 : 0 },
+    { id: "survivor", cat: "daily", icon: "\u2714", title: "UNTOUCHABLE",
+      desc: "Go 45s without taking damage", event: "no_damage_streak", target: 45,
+      tier: "medium", mode: "max", inc: d => d.seconds },
+    { id: "collector", cat: "daily", icon: "\u25CF", title: "COLLECTOR",
+      desc: "Collect 50 coins from pickups", event: "pickup_collected", target: 50,
+      tier: "easy", inc: d => d.kind === "coins" ? (d.value || 0) : 0 },
+    { id: "treasure", cat: "daily", icon: "\u25C6", title: "TREASURE HUNTER",
+      desc: "Collect a rare gem", event: "pickup_collected", target: 1, tier: "hard",
+      inc: d => d.kind === "gem" ? 1 : 0 },
+    { id: "powerups", cat: "daily", icon: "\u2726", title: "POWER UP",
+      desc: "Collect 5 power-ups", event: "pickup_collected", target: 5, tier: "medium",
+      inc: d => POWERUPS[d.kind] ? 1 : 0 }
+  ]
+};
+const MISSION_BY_ID = {};
+for (const m of MISSION_CONFIG.pool) MISSION_BY_ID[m.id] = m;
+function missionReward(m) { return MISSION_CONFIG.rewards[m.tier] || MISSION_CONFIG.rewards.easy; }
+
+/* Local calendar day. The reset is worked out from the date whenever the
+   game starts or the screen is opened -- no timer has to be left running. */
+function missionToday() {
+  const d = new Date();
+  return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" +
+         String(d.getDate()).padStart(2, "0");
+}
+
+/* Today's three are chosen from a seed made of the date itself, so the same
+   day always produces the same set -- a reload cannot reroll them, even if
+   the saved list were lost. At most one mission per event type, so the offer
+   is never two variations of the same thing. */
+function rollDailyMissions(dateKey) {
+  let seed = 0;
+  for (let i = 0; i < dateKey.length; i++) seed = (seed * 31 + dateKey.charCodeAt(i)) >>> 0;
+  const rnd = seededRng(seed);
+  const pool = MISSION_CONFIG.pool.filter(m => m.cat === "daily").slice();
+  // deterministic shuffle
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(rnd() * (i + 1));
+    const t = pool[i]; pool[i] = pool[j]; pool[j] = t;
+  }
+  const picked = [], events = new Set();
+  for (const m of pool) {
+    if (picked.length >= MISSION_CONFIG.dailyCount) break;
+    if (events.has(m.event)) continue;
+    events.add(m.event); picked.push(m.id);
+  }
+  return picked;
+}
+
+const Missions = {
+  /* Ensures state exists and matches today. Safe to call any number of
+     times; it only writes when the day actually changed. */
+  ensure() {
+    const d = Progress.data;
+    if (!d.missions || typeof d.missions !== "object") d.missions = { date: "", ids: [], progress: {}, claimed: {} };
+    const st = d.missions;
+    const today = missionToday();
+    if (st.date !== today) {
+      st.date = today;
+      st.ids = rollDailyMissions(today);
+      st.progress = {};
+      st.claimed = {};
+      Progress.save();
+    }
+    return st;
+  },
+  active() { return this.ensure().ids.map(id => MISSION_BY_ID[id]).filter(Boolean); },
+  progress(id) { return this.ensure().progress[id] || 0; },
+  claimed(id) { return !!this.ensure().claimed[id]; },
+  complete(id) {
+    const m = MISSION_BY_ID[id];
+    return !!m && this.progress(id) >= m.target;
+  },
+  /* Run-scoped fail marks (the no-health-pickup challenge). Cleared at the
+     start of every run, so a spoiled attempt can simply be retried. */
+  runFailed: Object.create(null),
+  resetRun() { this.runFailed = Object.create(null); },
+
+  /* The single funnel. Called only from authoritative gameplay events. */
+  record(event, data) {
+    const st = this.ensure();
+    data = data || {};
+    let changed = false;
+    for (const id of st.ids) {
+      const m = MISSION_BY_ID[id];
+      if (!m || st.claimed[id]) continue;
+      // a challenge spoiled this run stops tracking until the next run
+      if (m.failEvent === event && m.runFail && m.runFail(data)) {
+        if (!this.runFailed[id]) { this.runFailed[id] = true; game.toast(m.title + " FAILED THIS RUN", "#ff6b6b"); }
+        continue;
+      }
+      if (m.event !== event) continue;
+      if (this.runFailed[id]) continue;
+      const was = st.progress[id] || 0;
+      if (was >= m.target) continue;                 // already done, never re-fires
+      const v = m.inc(data) || 0;
+      if (v <= 0) continue;
+      const now = m.mode === "max" ? Math.max(was, v) : was + v;
+      if (now === was) continue;
+      st.progress[id] = Math.min(m.target, now);
+      changed = true;
+      if (st.progress[id] >= m.target) {
+        game.toast("MISSION COMPLETE  \u00b7  " + m.title, "#ffd76a");
+        SFX.gem();
+      }
+    }
+    if (changed) Progress.dirty = true;              // coalesced like the currencies
+  },
+
+  /* Claiming is explicit and one-shot. The claim is written before the
+     screen redraws, so a second click, tap or a refresh finds it taken. */
+  claim(id) {
+    const st = this.ensure();
+    const m = MISSION_BY_ID[id];
+    if (!m || st.claimed[id] || !this.complete(id)) return null;
+    st.claimed[id] = true;
+    const r = missionReward(m);
+    if (r.coins) Progress.addCoins(r.coins);
+    if (r.gems)  Progress.addGems(r.gems);
+    // the reward shape already allows upgrades and, later, skins; only what
+    // the game can actually apply today is ever offered
+    if (r.weaponUpgrade) applyUpgrade(r.weaponUpgrade.weapon + ":" + r.weaponUpgrade.upgrade);
+    Progress.save();                                  // banked before anything can redraw
+    return r;
+  }
+};
+
+/* Attribution for the current damage, read by die() so a kill can be
+   credited to the weapon or the ability that caused it. Set immediately
+   before the damage call and cleared after; JS runs each event to
+   completion, so there is no interleaving. */
+let killCtx = { weapon: null, source: null };
+
 /* Multi-kill and combo-tier callouts. Both only read game.kills / game.combo
    -- they award nothing and change no multiplier, they just say out loud what
    the existing scoring already did. */
@@ -2787,6 +3015,7 @@ function damageEnemy(z, dmg, kx, ky, weapon, hitX, hitY) {
         ["#c81f2a", "#8a1a1a", "#ffd76a", "#fff3b0"], [2.5, 7], [280, 620]);
       addShake(SCREEN_SHAKE_CONFIG.headshot);
       SFX.headshot();
+      Missions.record("headshot", { enemyType: z.type, isBoss: !!z.isBoss });
       if (floatAllowed("head")) floats.push(new FloatText(z.x, z.y - z.r - 8, "HEADSHOT", "#ffd76a", false));
     }
   }
@@ -2805,7 +3034,10 @@ function damageEnemy(z, dmg, kx, ky, weapon, hitX, hitY) {
   // the head hit shoves harder, and the flash hint rides along so hurt()
   // can size its own reaction without re-deriving anything
   z._headHit = head;
+  // credit whatever fired this shot, so a kill can be attributed
+  killCtx.weapon = weapon ? weapon.id : null;
   z.hurt(out, kx * (head ? 1.5 : 1), ky * (head ? 1.5 : 1), weapon);
+  killCtx.weapon = null;
   z._headHit = false;
   return out;
 }
@@ -3291,6 +3523,7 @@ class Player {
     this.powerups = {};        // key -> expiry timestamp (see POWERUPS)
     // clamped, so a config change or an older value can never exceed the cap
     this.lives = Math.min(LIFE_CONFIG.startingLives, LIFE_CONFIG.maxLives);   // run-scoped, not saved
+    this.lastHurtAt = 0;       // start of the current no-damage streak
     // upgrade-derived stats; applyUpgrades() fills these from the save
     this.wstats = null;
     this.armor = 0; this.staminaMax = 100; this.staminaRegen = 0.30;
@@ -3409,7 +3642,7 @@ class Player {
       this.items.blast--;
       this.blastReady = game.time + b.cooldown;
       const bs = gstat("blast");
-      explode(this.x, this.y, bs.radius, bs.dmg, b.knock, "#ff8de0", true);
+      explode(this.x, this.y, bs.radius, bs.dmg, b.knock, "#ff8de0", true, "ability");
       game.toast("POWER BLAST", b.color);
       SFX.blast();
 
@@ -3474,6 +3707,7 @@ class Player {
   }
   damage(n) {
     if (this.invuln > 0) return;
+    this.lastHurtAt = game.time;         // resets the untouched streak
     if (this.shielded) {
       // full-body layer: the hit lands on the barrier, not the player
       this.shieldFlash = 220;
@@ -3719,13 +3953,18 @@ class Zombie {
     }
     game.kills++;
     // The single place a kill is confirmed, so this is the single place the
-    // kill coin is granted: exactly one per enemy, whatever killed it and
-    // however much damage it took. A physical coin drop is a separate,
-    // additional source (see the drop table below).
+    // kill coin is granted and the single place a mission hears about it:
+    // exactly one per enemy, whatever killed it and however much damage it
+    // took. A physical coin drop is a separate, additional source.
     awardKillCoin();
+    Missions.record("zombie_killed", {
+      enemyType: this.type, isBoss: !!this.isBoss,
+      weapon: killCtx.weapon, source: killCtx.source, isHeadshot: !!head
+    });
     game.combo++;
     game.comboTimer = 2200;
     if (game.combo > game.maxCombo) game.maxCombo = game.combo;
+    Missions.record("combo", { combo: game.combo });
     const mult = 1 + Math.min(1.5, Math.floor(game.combo / 5) * 0.25);
     const pts = Math.round(this.t.points * mult);
     game.addScore(pts, this.x, this.y, mult > 1);
@@ -4138,7 +4377,7 @@ class Grenade {
       this.dead = true;
       const g = ITEMS.grenade;
       const gs = gstat("grenade");
-      explode(this.x, this.y, gs.radius, gs.dmg, g.knock, "#ffb648", false);
+      explode(this.x, this.y, gs.radius, gs.dmg, g.knock, "#ffb648", false, "ability");
       SFX.boom();
     }
   }
@@ -4187,7 +4426,10 @@ class Shockwave {
 /* Radial damage with linear falloff -- shared by grenades and the power blast.
    selfSafe blasts (the player's own nova) never hurt the player; a grenade can,
    at half damage, so throwing one at your feet is a real mistake. */
-function explode(x, y, radius, dmg, knock, color, selfSafe) {
+/* `source` labels who caused the blast ("ability" for grenade / blast / air
+   strike) so kills inside it can be credited. Weapon shells deliberately do
+   not pass it -- they are gunfire, not an ability. */
+function explode(x, y, radius, dmg, knock, color, selfSafe, source) {
   shockwaves.push(new Shockwave(x, y, radius, color, 7));
   shockwaves.push(new Shockwave(x, y, radius * 0.62, "#ffffff", 3));
   addShake(16);                      // same punch, now calmer on a phone
@@ -4201,6 +4443,8 @@ function explode(x, y, radius, dmg, knock, color, selfSafe) {
   decals.push({ x, y, r: radius * 0.34, a: 0.35 });
   if (decals.length > 90) decals.shift();
 
+  const prevSource = killCtx.source;
+  killCtx.source = source || null;
   const r2 = radius * radius;
   for (const z of zombies) {
     if (z.dead) continue;
@@ -4212,6 +4456,7 @@ function explode(x, y, radius, dmg, knock, color, selfSafe) {
     const uy = d > 0.01 ? (z.y - y) / d : rand(-1, 1);
     z.hurt(dmg * fall, ux * knock, uy * knock);
   }
+  killCtx.source = prevSource;
   if (!selfSafe) {
     const d = Math.hypot(player.x - x, player.y - y);
     if (d < radius) player.damage(Math.round(dmg * (1 - d / radius) * 0.5));
@@ -4402,6 +4647,10 @@ class Pickup {
 
     if (dist2(this.x, this.y, player.x, player.y) < 24 * 24) {
       this.dead = true;
+      // Fired once, here, at the moment of collection -- not when a magnet
+      // starts pulling. A heart refused at the cap uncollects below, so it
+      // reports again only when it is genuinely taken.
+      Missions.record("pickup_collected", { kind: this.kind, value: this.value || 0 });
       if (POWERUPS[this.kind]) {
         if (this.kind === "magnet" && !Progress.data.seenMagnet) {
           Progress.data.seenMagnet = true; Progress.save();
@@ -4430,7 +4679,7 @@ class Pickup {
         // At the cap the heart is NOT consumed -- it stays on the ground so
         // it is still there once a life has been spent. undead() puts back
         // the flag the collection block already set.
-        if (player.lives >= LIFE_CONFIG.maxLives) { this.uncollect(); return; }
+        if (player.lives >= LIFE_CONFIG.maxLives) { this.uncollect(); return; }   // never collected, so nothing counted it
         player.lives = Math.min(LIFE_CONFIG.maxLives, player.lives + 1);
         game.toast("+1 LIFE  \u00b7  " + player.lives + "/" + LIFE_CONFIG.maxLives, "#ff5a7a");
         pickupBurst(this.x, this.y, "#ff5a7a", 12);
@@ -4757,6 +5006,7 @@ const game = {
     grenades = []; shockwaves = []; corpses = [];
     projectiles = []; flames = []; arcs = [];
     resetAirStrike();
+    Missions.resetRun();          // a spoiled challenge can be retried next run
     slowMoLeft = 0; slowMoScale = COMBAT_FEEDBACK_CONFIG.slowMo.scale;
     killWindow.length = 0;
     for (const k in floatGate) delete floatGate[k];
@@ -4948,11 +5198,16 @@ const game = {
 
   endWave() {
     this.waveActive = false;
+    Missions.record("wave_completed", { wave: this.wave, mode: this.mode });
     if (this.mode === "campaign") {
       this.eventMod = null; this.dark = 0;
       this.planIdx++;
       this.grantGear();
-      if (this.planIdx >= this.plan.length) { this.stageComplete(); return; }
+      if (this.planIdx >= this.plan.length) {
+        Missions.record("stage_completed", { world: this.cw, stage: this.cs });
+        this.stageComplete();
+        return;
+      }
       this.breakTimer = 2600;
       this.banner = "WAVE CLEARED"; this.bannerTime = 1600;
       player.hp = Math.min(player.maxHp, player.hp + 12);
@@ -5044,7 +5299,7 @@ const game = {
 
 /* ================= SCREENS =================
    One place decides which overlay is up, so no two can stack. */
-const SCREENS = ["menu", "how", "settings", "worlds", "worldintro", "stages", "upgrade", "stagedone", "worlddone", "gameover", "paused", "confirm"];
+const SCREENS = ["menu", "how", "settings", "missions", "worlds", "worldintro", "stages", "upgrade", "stagedone", "worlddone", "gameover", "paused", "confirm"];
 let overlayShown = true;   // cheap mirror of "is any overlay up"
 function showScreen(id) {
   for (const sc of SCREENS) {
@@ -5070,6 +5325,78 @@ function refreshWallet() {
   if (!c || !g) return;
   c.textContent = (Progress.data.coins | 0).toLocaleString();
   g.textContent = (Progress.data.gems | 0).toLocaleString();
+}
+
+/* ---- missions screen ----
+   Rebuilt from saved state every time it opens, so it always reflects the
+   real progress and cannot drift. One claim handler per card, created with
+   the card, so there is no listener left over from a previous open. */
+function showMissions() {
+  audio();
+  Missions.ensure();
+  game.state = "missions";
+  const list = $("msList");
+  list.innerHTML = "";
+  const ms = Missions.active();
+  $("msSub").textContent = "resets daily  \u00b7  " + Missions.ensure().date;
+
+  for (const m of ms) {
+    const prog = Missions.progress(m.id);
+    const done = prog >= m.target;
+    const claimed = Missions.claimed(m.id);
+    const failed = !!Missions.runFailed[m.id];
+    const r = missionReward(m);
+
+    const card = document.createElement("div");
+    card.className = "msCard" + (done ? " done" : "") + (claimed ? " claimed" : "");
+    card.innerHTML =
+      '<div class="mIcon"></div>' +
+      '<div class="mName"></div>' +
+      '<div class="mDesc"></div>' +
+      '<div class="mBarWrap"><div class="mBar"></div></div>' +
+      '<div class="mRight"><div class="mRew"></div><div class="mNums"></div></div>';
+    card.querySelector(".mIcon").textContent = m.icon;
+    card.querySelector(".mName").textContent = m.title;
+    card.querySelector(".mDesc").textContent = m.desc;
+    card.querySelector(".mBar").style.width = Math.round(prog / m.target * 100) + "%";
+    card.querySelector(".mNums").textContent = prog + " / " + m.target;
+    card.querySelector(".mRew").innerHTML =
+      "\u25CF " + r.coins + (r.gems ? '  <span class="g">\u25C6 ' + r.gems + "</span>" : "");
+
+    const right = card.querySelector(".mRight");
+    if (claimed) {
+      const s2 = document.createElement("div");
+      s2.className = "mState ok"; s2.textContent = "\u2714 CLAIMED";
+      right.appendChild(s2);
+    } else if (done) {
+      const btn = document.createElement("button");
+      btn.textContent = "CLAIM";
+      let taken = false;
+      // one handler, one claim: the flag closes the door before any second
+      // pointerdown from a double tap can arrive
+      btn.addEventListener("pointerdown", (ev) => {
+        ev.preventDefault(); ev.stopPropagation();
+        if (taken) return;
+        taken = true;
+        const got = Missions.claim(m.id);
+        if (!got) return;
+        SFX.gem();
+        game.toast("MISSION COMPLETE!", "#ffd76a");
+        refreshWallet();
+        showMissions();                       // redraw from the saved state
+      });
+      right.appendChild(btn);
+    } else {
+      const s2 = document.createElement("div");
+      s2.className = "mState" + (failed ? " fail" : "");
+      s2.textContent = failed ? "FAILED THIS RUN" : "IN PROGRESS";
+      right.appendChild(s2);
+    }
+    list.appendChild(card);
+  }
+
+  hideAllScreens(); showScreen("missions");
+  checkOrientation();
 }
 
 function goMenu() {
@@ -5514,6 +5841,8 @@ $("endlessBtn").addEventListener("click", startEndless);
 $("settingsBtn").addEventListener("click", () => { audio(); refreshSettings(); game.state = "settings"; hideAllScreens(); showScreen("settings"); });
 $("howBtn").addEventListener("click", () => { game.state = "how"; hideAllScreens(); showScreen("how"); });
 $("howBack").addEventListener("click", goMenu);
+$("missionsBtn").addEventListener("click", showMissions);
+$("msBack").addEventListener("click", goMenu);
 $("setBack").addEventListener("click", goMenu);
 $("setSound").addEventListener("click", () => {
   soundOn = !soundOn;
@@ -5677,6 +6006,12 @@ function update(dt) {
   arcs = arcs.filter(o => !o.dead);
   shockwaves = shockwaves.filter(o => !o.dead);
   corpses = corpses.filter(o => !o.dead);
+
+  // Untouched streak, in game time. update() runs only in "play", so this
+  // freezes with pause and cannot be run up from a menu. It is deliberately
+  // not gated on waveActive -- that flaps between waves and made the streak
+  // record in bursts rather than continuously.
+  Missions.record("no_damage_streak", { seconds: Math.floor((game.time - player.lastHurtAt) / 1000) });
 
   // combo decay
   if (game.comboTimer > 0) {

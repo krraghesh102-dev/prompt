@@ -329,6 +329,63 @@ scaled by wave number and remaining health. Best score persists in
 
 **Drops** — dead zombies sometimes leave medkits (+25 HP) or ammo boxes.
 
+## Missions
+
+**MISSIONS** on the main menu opens three daily challenges. Each card shows
+its icon, name, goal, a progress bar, the count, the reward, and a **CLAIM**
+button once complete.
+
+The set rotates on your **local calendar day**, worked out from the date
+whenever the game starts or the screen opens — no timer has to be left
+running. Today's three are chosen by seeding the shuffle with the date
+string itself, so a reload cannot reroll them *even if the saved list were
+lost*, and no two share an event type, so you never get two variations of
+the same goal.
+
+Progress comes only from authoritative gameplay events through one funnel,
+`Missions.record(event, data)`:
+
+| Event | Fired from |
+|---|---|
+| `zombie_killed` | `die()` — the one place a death is finalised |
+| `headshot` | the head-hit branch of `damageEnemy()` |
+| `pickup_collected` | the single collection site in `Pickup.update()` |
+| `wave_completed` | `endWave()` |
+| `stage_completed` | the campaign stage clear |
+| `combo` | the combo increment in `die()` |
+| `no_damage_streak` | per frame in `update()`, so it freezes with pause |
+
+Because those are the same events that already award score, kills and coins,
+one kill is one increment: seven shotgun pellets into a zombie count once,
+an explosion killing ten counts ten, and damage that does not kill counts
+nothing. A brute counts toward both the total and the brute goal. A kill is
+credited to the weapon that fired it or to `ability` for grenade, blast and
+air strike — a weapon-fired rocket is gunfire, not an ability. A pickup
+counts when it is *collected*, not when a magnet starts pulling it.
+
+A mission declares `mode: "sum"` (default) or `"max"` — the latter for
+reach-a-combo and no-damage-streak goals, where the best single value is
+what matters.
+
+**Rewards are never auto-granted.** A finished mission shows CLAIM; claiming
+applies the reward and writes `claimed` before anything can redraw, so a
+double click, a double tap, a second programmatic call and a page refresh
+all find it taken. Coins and gems are supported today; the reward shape also
+carries `weaponUpgrade` (applied through the existing upgrade system) and
+leaves room for skins, which do not exist yet and are therefore never
+offered.
+
+The **FIELD MEDIC** challenge is run-scoped: collecting a health pickup
+marks it failed *for that run only* — a heart does not, it is not a medkit —
+and starting another run clears the mark so it can be attempted again.
+
+State lives in the existing save under `missions` (`date`, `ids`,
+`progress`, `claimed`). A save written before missions existed simply has
+none and gains today's set on first use, keeping weapons, upgrades, coins,
+gems, stars and best wave untouched. Categories (`cat: "daily"`) are already
+in the data, so weekly, campaign or achievement sets can be added without
+touching the engine.
+
 ## Collectibles
 
 Health, ammo, and the gear charges keep exactly the drop rates they always
